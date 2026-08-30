@@ -35,19 +35,21 @@ die()  { printf '\033[1;31m ✘ %s\033[0m\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 ask()  { [ "$ASSUME_YES" = 1 ] && return 0; read -r -p "$1 [y/N] " a; [[ "${a,,}" == y* ]]; }
 
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --yes)         ASSUME_YES=1 ;;
         --skip-apt)    SKIP_APT=1 ;;
         --skip-qt)     SKIP_QT=1 ;;
         --skip-fonts)  SKIP_FONTS=1 ;;
         --skip-config) SKIP_CONFIG=1 ;;
-        --qt-version)  shift; QT_VERSION="$1" ;;
+        --qt-version)
+            [ -n "${2:-}" ] || die "--qt-version needs a value (e.g. 6.11.2)"
+            QT_VERSION="$2"; shift ;;
         -h|--help)     grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) die "unknown option: $arg" ;;
+        *) die "unknown option: $1" ;;
     esac
+    shift
 done
-[ $# -ge 2 ] && [ "$1" = "--qt-version" ] && shift 2
 
 # ----------------------------------------------------------------------------
 preflight() {
@@ -70,6 +72,8 @@ preflight() {
         *) die "Qt $QT_VERSION is too old — Caelestia master needs >= 6.11 (DoubleSpinBox)" ;;
     esac
     QT_ROOT="/opt/qt${QT_VERSION%%.*}"
+    $SKIP_QT && [ ! -x "$QT_ROOT/$QT_VERSION/gcc_64/bin/qmake6" ] && \
+        die "--skip-qt given but Qt $QT_VERSION is not installed at $QT_ROOT"
 
     log "sudo password required for package installs and /opt, /usr/local writes"
     sudo -v
@@ -92,19 +96,24 @@ stage_apt() {
         sudo apt-get update -y
     fi
 
+    # Core: every one of these must install for the build to succeed.
     sudo apt-get install -y \
-        build-essential cmake ninja-build git curl wget pkg-config patchelf \
+        build-essential cmake ninja-build git curl wget pkg-config patchelf unzip \
         libgl1-mesa-dev libdrm-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-        libjemalloc-dev libunwind-dev \
+        libunwind-dev \
         libpipewire-0.3-dev libspa-0.2-dev libaubio-dev \
         libqalculate-dev qalculate libsensors-dev \
         libasound2-dev libpulse-dev libfftw3-dev libinih-dev \
-        autoconf automake libtool \
-        meson libffi-dev libexpat1-dev libxml2-dev unzip \
+        autoconf automake libtool meson libffi-dev libexpat1-dev libxml2-dev \
         hyprland hypridle hyprlock hyprpaper xdg-desktop-portal-hyprland \
-        xdg-desktop-portal-gtk \
-        foot wlogout brightnessctl ddcutil lm-sensors swappy \
-        policykit-1-gnome network-manager
+        xdg-desktop-portal-gtk network-manager
+
+    # Nice-to-haves: install individually so one missing package on an older
+    # release never fails the whole stage.
+    local p
+    for p in libjemalloc-dev foot wlogout brightnessctl ddcutil lm-sensors swappy policykit-1-gnome; do
+        sudo apt-get install -y "$p" >/dev/null 2>&1 || warn "optional package unavailable on this release: $p"
+    done
 
     # Best-effort flatpak apps referenced by the default binds
     if have flatpak; then
@@ -244,7 +253,13 @@ stage_shell() {
     if [ -d "$dir/.git" ]; then
         if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null | head -1)" ]; then
             git -C "$dir" branch -f backup-local-changes
-            warn "local changes found in $dir — saved to branch backup-local-changes"
+            # also preserve untracked files (git clean -fd would remove them)
+            local ub="$HOME/.cache/caelestia-shell-untracked-backup-$(date +%Y%m%d-%H%M%S)"
+            mkdir -p "$ub"
+            git -C "$dir" status --porcelain | grep '^??' | sed 's/^?? //' | while read -r f; do
+                cp -a "$dir/$f" "$ub/" 2>/dev/null || true
+            done
+            warn "local changes found in $dir — tracked changes saved to branch backup-local-changes, untracked files copied to $ub"
         fi
         git -C "$dir" fetch origin
         git -C "$dir" reset --hard origin/main
@@ -266,11 +281,13 @@ stage_shell() {
 stage_cli() {
     log "stage: caelestia CLI (best effort)"
     if have uv; then
-        uv tool install --force caelestia && ok "caelestia CLI via uv" && return 0
+        uv tool install --force git+https://github.com/caelestia-dots/cli \
+            && ok "caelestia CLI via uv (from upstream git)" && return 0
     elif have pipx; then
-        pipx install --force caelestia && ok "caelestia CLI via pipx" && return 0
+        pipx install --force "caelestia-cli @ git+https://github.com/caelestia-dots/cli" \
+            && ok "caelestia CLI via pipx" && return 0
     fi
-    warn "caelestia CLI not installed (uv/pipx missing) — shell still works, 'caelestia shell -d' autostart falls back to qs"
+    warn "caelestia CLI not installed (uv/pipx missing) — shell still works; CLI adds 'caelestia shell -d' autostart, theme CLI and wallpaper commands"
 }
 
 stage_fonts() {
@@ -331,8 +348,20 @@ stage_config() {
                 "$REPO_DIR/configs/system-sleep/caelestia-shell-restart.sh" /usr/lib/systemd/system-sleep/
         sudo chmod +x /usr/lib/systemd/system-sleep/caelestia-*.sh
 
-        cp "$REPO_DIR/configs/wallpapers/default.jpg" "$HOME/Pictures/Wallpapers/default.jpg"
-        cp "$REPO_DIR/configs/wallpapers/default.jpg" "$HOME/Pictures/wallpapers/default.jpg"
+        cp "$REPO_DIR/configs/wallpapers/wallpaper.jpg" "$HOME/Pictures/Wallpapers/wallpaper.jpg"
+        cp "$REPO_DIR/configs/wallpapers/wallpaper.jpg" "$HOME/Pictures/wallpapers/wallpaper.jpg"
+
+        # Pre-seed the shell's wallpaper state so the maintainer's wallpaper and
+        # its dynamic colour scheme are active from the very first login (the
+        # shell normally writes this itself when a wallpaper is chosen).
+        mkdir -p "$HOME/.local/state/caelestia/wallpaper"
+        printf '%s\n' "$HOME/Pictures/wallpapers/wallpaper.jpg" > "$HOME/.local/state/caelestia/wallpaper/path.txt"
+        ln -sf "$HOME/Pictures/wallpapers/wallpaper.jpg" "$HOME/.local/state/caelestia/wallpaper/current"
+        # If the shell is already running (re-run of this script), apply live too.
+        if systemctl --user is-active --quiet caelestia-shell.service 2>/dev/null && have caelestia; then
+            caelestia wallpaper -f "$HOME/Pictures/wallpapers/wallpaper.jpg" 2>/dev/null \
+                || warn "could not apply wallpaper via CLI — it will be used on next login"
+        fi
 
         # polkit agent path used by hyprland.conf
         if [ ! -x /usr/libexec/polkit-gnome-authentication-agent-1 ]; then
@@ -354,6 +383,31 @@ stage_config() {
 }
 
 # ----------------------------------------------------------------------------
+stage_verify() {
+    log "stage: post-install verification"
+    local fail=0
+    env -u LD_LIBRARY_PATH /usr/local/bin/qs --version >/dev/null 2>&1 \
+        && ok "quickshell runs" || { warn "quickshell does not run"; fail=1; }
+    [ -x /usr/lib/caelestia/version ] \
+        && ok "caelestia shell $(/usr/lib/caelestia/version -s 2>/dev/null)" || { warn "caelestia version helper missing"; fail=1; }
+    [ -d /lib/qt6/qml/Caelestia ] || [ -d /usr/lib/qt6/qml/Caelestia ] \
+        && ok "Caelestia QML module present" || { warn "Caelestia QML module missing"; fail=1; }
+    [ -d /lib/qt6/qml/M3Shapes ] || [ -d /usr/lib/qt6/qml/M3Shapes ] \
+        && ok "M3Shapes module present" || { warn "M3Shapes missing"; fail=1; }
+    [ -f "$QT_ROOT/$QT_VERSION/gcc_64/plugins/imageformats/libqwebp.so" ] \
+        && ok "Qt webp support present" || { warn "webp plugin missing"; fail=1; }
+    grep -q wl_fixes /usr/local/include/wayland-client-protocol.h 2>/dev/null \
+        && ok "wayland headers ok (wl_fixes)" || { warn "wayland headers incomplete"; fail=1; }
+    fc-list 2>/dev/null | grep -qiE 'Material Symbols' \
+        && ok "Material Symbols font present" || { warn "Material Symbols font missing — icons will be blank"; fail=1; }
+    [ -f "$HOME/Pictures/wallpapers/wallpaper.jpg" ] \
+        && ok "wallpaper deployed" || { warn "wallpaper missing"; fail=1; }
+    hyprctl version >/dev/null 2>&1 \
+        && ok "hyprland on PATH" || ok "hyprland installed (session entry appears after re-login)"
+    [ "$fail" = 0 ] && ok "ALL CHECKS PASSED" || die "one or more checks failed — see the ! lines above"
+}
+
+# ----------------------------------------------------------------------------
 main() {
     preflight
     stage_apt
@@ -367,6 +421,7 @@ main() {
     stage_fonts
     stage_config
     sudo ldconfig
+    stage_verify
 
     echo
     log "install complete. next steps:"

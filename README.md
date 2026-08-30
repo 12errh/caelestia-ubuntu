@@ -17,6 +17,21 @@ That's it. Reboot, pick **Hyprland** in the GDM gear menu, log in.
 
 ---
 
+## Screenshots
+
+This is what you get on the first login — no tweaking required.
+
+| | |
+|---|---|
+| ![Desktop](assets/screenshot-desktop.png) | ![Dashboard](assets/screenshot-dashboard.png) |
+| *Desktop — wallpaper, bar, visualiser* | *Dashboard — quick toggles, system info* |
+| ![Launcher](assets/screenshot-launcher.png) | ![Session](assets/screenshot-session.png) |
+| *Launcher — apps, `>` actions, `>wallpaper` picker* | *Session — logout / reboot / shutdown* |
+
+The whole UI (bars, drawers, lock screen, OSD) recolours itself from the
+wallpaper — switch it with `>wallpaper` in the launcher or
+`caelestia wallpaper -f <file>`.
+
 ## What you get
 
 Exactly the setup running on the maintainer's machine:
