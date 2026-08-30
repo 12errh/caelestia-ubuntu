@@ -1,0 +1,28 @@
+[Unit]
+Description=Caelestia Shell (Quickshell)
+PartOf=graphical-session.target
+After=graphical-session.target
+# The systemd-sleep hook bounces the shell after suspend/resume, so allow
+# several restarts in a row — but cap the loop so a dead compositor cannot
+# cause an endless 3-second restart spin.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# Wait for Hyprland/Wayland to be ready before launching
+ExecStartPre=/bin/sleep 2
+Type=simple
+Environment=LD_LIBRARY_PATH=/opt/qt611/6.11.2/gcc_64/lib
+Environment=QML_IMPORT_PATH=/usr/local/lib/qt6/qml:/lib/qt6/qml:/opt/qt611/6.11.2/gcc_64/qml
+Environment=QT_QPA_PLATFORM=wayland
+Environment=XDG_CURRENT_DESKTOP=Hyprland:GNOME
+Environment=XDG_SESSION_DESKTOP=Hyprland
+Environment=PATH=/opt/qt611/6.11.2/gcc_64/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/usr/local/bin/qs -c caelestia -n
+Restart=always
+RestartSec=3
+TimeoutStopSec=5
+TimeoutStartSec=30
+
+[Install]
+WantedBy=graphical-session.target
