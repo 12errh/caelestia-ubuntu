@@ -1,0 +1,81 @@
+name: CI
+
+# Prove the installer (a) is shellcheck-clean and (b) actually builds + runs the
+# Caelestia/Hyprland stack on a real Ubuntu 24.04 system. The heavy `e2e` job
+# runs the full setup.sh and then launches Hyprland headless (WLR_BACKENDS=headless,
+# Mesa llvmpipe) with Quickshell/Caelestia as a Wayland client, exactly as a real
+# login would — minus the physical GPU and monitor.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Fast, runs on every push/PR: static analysis only.
+  # --------------------------------------------------------------------------
+  lint:
+    name: Shellcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: Lint scripts
+        run: shellcheck -S error setup.sh uninstall.sh scripts/ci-headless-smoke.sh
+
+  # --------------------------------------------------------------------------
+  # Heavy, real-system test. Cached Qt download + source clones keep re-runs
+  # affordable; the first run still downloads/compiles a lot, hence the long
+  # timeout and the build-space maximization step.
+  # --------------------------------------------------------------------------
+  e2e:
+    name: Build + headless GUI smoke (real Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 1024
+          swap-size-mb: 4096
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+
+      - name: Cache Qt toolchain + source clones
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/qt611
+            ~/.cache/caelestia-ubuntu-build
+          key: caelestia-ubuntu-${{ runner.os }}-qt611-v1
+          restore-keys: |
+            caelestia-ubuntu-${{ runner.os }}-qt611-
+
+      - name: Run installer (build everything + deploy configs)
+        # --skip-fonts avoids the network font downloads (irrelevant to the
+        # build/run test and flaky behind CDNs). Everything else runs for real.
+        run: ./setup.sh --yes --skip-fonts
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Install headless-runtime test deps
+        run: sudo apt-get install -y seatd mesa-utils dbus
+
+      - name: Headless GUI smoke test (Hyprland + Quickshell/Caelestia)
+        run: sudo bash scripts/ci-headless-smoke.sh
