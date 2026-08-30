@@ -44,8 +44,8 @@ jobs:
     timeout-minutes: 360
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-
+      # MUST run before checkout: this action remounts / with a larger
+      # filesystem, which would otherwise wipe anything already checked out.
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -56,6 +56,8 @@ jobs:
           remove-haskell: true
           remove-codeql: true
           remove-docker-images: true
+
+      - uses: actions/checkout@v4
 
       - name: Cache Qt toolchain + source clones
         uses: actions/cache@v4
