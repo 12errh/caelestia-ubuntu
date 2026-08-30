@@ -70,7 +70,13 @@ jobs:
       - name: Run installer (build everything + deploy configs)
         # --skip-fonts avoids the network font downloads (irrelevant to the
         # build/run test and flaky behind CDNs). Everything else runs for real.
-        run: ./setup.sh --yes --skip-fonts
+        # Invoked via `bash` (not ./setup.sh) so a missing +x bit or CRLF
+        # shebang in the checkout can't produce a spurious "No such file" error.
+        run: |
+          pwd
+          ls -la setup.sh
+          bash setup.sh --yes --skip-fonts
+        working-directory: ${{ github.workspace }}
         env:
           DEBIAN_FRONTEND: noninteractive
 
