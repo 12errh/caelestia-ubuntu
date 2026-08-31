@@ -34,9 +34,9 @@ jobs:
         run: shellcheck -S error setup.sh uninstall.sh scripts/ci-headless-smoke.sh
 
   # --------------------------------------------------------------------------
-  # Heavy, real-system test. Cached Qt download + source clones keep re-runs
-  # affordable; the first run still downloads/compiles a lot, hence the long
-  # timeout and the build-space maximization step.
+  # Heavy, real-system test. The runner's `/` is too small for the full build,
+  # so the big ephemeral disk is mounted at the workspace and the installer's
+  # heaviest writes (/opt/qt611, /usr/local, $HOME) are redirected onto it.
   # --------------------------------------------------------------------------
   e2e:
     name: Build + headless GUI smoke (real Ubuntu 24.04)
@@ -44,8 +44,9 @@ jobs:
     timeout-minutes: 360
     needs: lint
     steps:
-      # MUST run before checkout: this action remounts / with a larger
-      # filesystem, which would otherwise wipe anything already checked out.
+      # MUST run before checkout: this action mounts the runner's large
+      # ephemeral disk at GITHUB_WORKSPACE. It does NOT expand `/` itself, so
+      # the heavy writes below are redirected onto this mounted disk.
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -57,27 +58,35 @@ jobs:
           remove-codeql: true
           remove-docker-images: true
 
-      - uses: actions/checkout@v4
+      - name: Redirect heavy writes to the expanded build disk
+        # `/` only has ~3 GB free after maximize; the big disk is at the
+        # workspace path. Point the installer's largest consumers there:
+        #   /opt/qt611  (~2 GB Qt download)        -> build-disk/opt-qt
+        #   /usr/local  (built binaries install)   -> build-disk/usr-local
+        #   $HOME       (source clones + build caches + configs) -> build-disk/home
+        # This keeps `/` usage small enough to build successfully.
+        run: |
+          set -e
+          DISK="${{ github.workspace }}/build-disk"
+          sudo mkdir -p "$DISK/opt-qt" "$DISK/usr-local" "$DISK/home"
+          sudo rm -rf /opt/qt611
+          sudo ln -s "$DISK/opt-qt" /opt/qt611
+          sudo cp -a /usr/local/. "$DISK/usr-local/"
+          sudo rm -rf /usr/local
+          sudo ln -s "$DISK/usr-local" /usr/local
+          echo "HOME=$DISK/home" >> "$GITHUB_ENV"
 
-      - name: Cache Qt toolchain + source clones
-        uses: actions/cache@v4
-        with:
-          path: |
-            /opt/qt611
-            ~/.cache/caelestia-ubuntu-build
-          key: caelestia-ubuntu-${{ runner.os }}-qt611-v1
-          restore-keys: |
-            caelestia-ubuntu-${{ runner.os }}-qt611-
+      - uses: actions/checkout@v4
 
       - name: Run installer (build everything + deploy configs)
         # --skip-fonts avoids the network font downloads (irrelevant to the
         # build/run test and flaky behind CDNs). Everything else runs for real.
-        # Invoked via `bash` (not ./setup.sh) so a missing +x bit or CRLF
-        # shebang in the checkout can't produce a spurious "No such file" error.
+        # --ignore-space skips the 8 GB / check (space lives on the mounted
+        # workspace disk instead). Invoked via `bash` to avoid any +x/CRLF issue.
         run: |
           pwd
           ls -la setup.sh
-          bash setup.sh --yes --skip-fonts
+          bash setup.sh --yes --skip-fonts --ignore-space
         working-directory: ${{ github.workspace }}
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -86,4 +95,6 @@ jobs:
         run: sudo apt-get install -y seatd mesa-utils dbus
 
       - name: Headless GUI smoke test (Hyprland + Quickshell/Caelestia)
-        run: sudo bash scripts/ci-headless-smoke.sh
+        # Run as the user (NOT sudo): it must keep the redirected $HOME so it
+        # finds the deployed ~/.config. Only `seatd` inside the script uses sudo.
+        run: bash scripts/ci-headless-smoke.sh

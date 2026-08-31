@@ -25,7 +25,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_ROOT="$HOME/.cache/caelestia-ubuntu-build"
 QT_ROOT=""
 ASSUME_YES=0
-SKIP_APT=0; SKIP_QT=0; SKIP_FONTS=0; SKIP_CONFIG=0
+SKIP_APT=0; SKIP_QT=0; SKIP_FONTS=0; SKIP_CONFIG=0; IGNORE_SPACE=0
 
 # ----------------------------------------------------------------------------
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -42,6 +42,7 @@ while [ $# -gt 0 ]; do
         --skip-qt)     SKIP_QT=1 ;;
         --skip-fonts)  SKIP_FONTS=1 ;;
         --skip-config) SKIP_CONFIG=1 ;;
+        --ignore-space) IGNORE_SPACE=1 ;;
         --qt-version)
             [ -n "${2:-}" ] || die "--qt-version needs a value (e.g. 6.11.2)"
             QT_VERSION="$2"; shift ;;
@@ -60,9 +61,13 @@ preflight() {
         *) warn "not a Debian/Ubuntu derivative — continuing anyway" ;;
     esac
     [ "$(uname -m)" = "x86_64" ] || die "x86_64 required"
-    local avail_gb
-    avail_gb=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
-    [ "$avail_gb" -lt 8 ] && die "need at least 8 GB free on / (have ${avail_gb}G)"
+    if [ "$IGNORE_SPACE" = 1 ]; then
+        warn "skipping free-disk check (--ignore-space)"
+    else
+        local avail_gb
+        avail_gb=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+        [ "$avail_gb" -lt 8 ] && die "need at least 8 GB free on / (have ${avail_gb}G)"
+    fi
 
     # Must include a Qt >= 6.11: Caelestia master uses QtQuick.Controls
     # DoubleSpinBox (introduced in Qt 6.11). 6.11.2 is what Arch currently
