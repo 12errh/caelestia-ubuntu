@@ -14,7 +14,11 @@
 # ----------------------------------------------------------------------------
 set -uo pipefail
 
-QT="/opt/qt611/6.11.2/gcc_64"
+# setup.sh installs Qt to /opt/qt<major> (e.g. /opt/qt6 for 6.11.2). Derive the
+# real gcc_64 path rather than hardcoding it.
+QT_DIR="$(ls -d /opt/qt*/6.*/gcc_64 2>/dev/null | head -1)"
+[ -n "$QT_DIR" ] || { echo "!! Qt gcc_64 dir not found under /opt/qt*"; exit 1; }
+QT="$QT_DIR"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$XDG_RUNTIME_DIR"
 

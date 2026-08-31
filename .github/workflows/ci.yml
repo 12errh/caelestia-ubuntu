@@ -36,7 +36,7 @@ jobs:
   # --------------------------------------------------------------------------
   # Heavy, real-system test. The runner's `/` is too small for the full build,
   # so the big ephemeral disk is mounted at the workspace and the installer's
-  # heaviest writes (/opt/qt611, /usr/local, $HOME) are redirected onto it.
+  # heaviest writes (/opt/qt6, /usr/local, $HOME) are redirected onto it.
   # --------------------------------------------------------------------------
   e2e:
     name: Build + headless GUI smoke (real Ubuntu 24.04)
@@ -66,7 +66,7 @@ jobs:
         # fail with EACCES. `/` only has ~3 GB free after maximize; the big disk
         # is mounted at the workspace path, so point the installer's largest
         # consumers there:
-        #   /opt/qt611  (~2 GB Qt download)        -> build-disk/opt-qt
+        #   /opt/qt6    (~2 GB Qt download)        -> build-disk/opt-qt
         #   /usr/local  (built binaries install)   -> build-disk/usr-local
         #   $HOME       (source clones + build caches + configs) -> build-disk/home
         # User-facing dirs (home, opt-qt) are chowned to the runner so the
@@ -78,8 +78,8 @@ jobs:
           sudo cp -a /usr/local/. "$DISK/usr-local/"
           sudo rm -rf /usr/local
           sudo ln -s "$DISK/usr-local" /usr/local
-          sudo rm -rf /opt/qt611
-          sudo ln -s "$DISK/opt-qt" /opt/qt611
+          sudo rm -rf /opt/qt6
+          sudo ln -s "$DISK/opt-qt" /opt/qt6
           sudo chown -R "$(id -u):$(id -g)" "$DISK/home" "$DISK/opt-qt"
           echo "HOME=$DISK/home" >> "$GITHUB_ENV"
 

@@ -110,7 +110,7 @@ stage_apt() {
         libunwind-dev \
         libpipewire-0.3-dev libspa-0.2-dev libaubio-dev \
         libqalculate-dev libsensors-dev \
-        libasound2-dev libpulse-dev libfftw3-dev libinih-dev \
+        libasound2-dev libpulse-dev libfftw3-dev libinih-dev libiniparser-dev \
         autoconf automake libtool meson libffi-dev libexpat1-dev libxml2-dev \
         hyprland hypridle hyprlock hyprpaper xdg-desktop-portal-hyprland \
         xdg-desktop-portal-gtk network-manager

@@ -40,7 +40,7 @@ sudo ldconfig
 
 if [ "$PURGE_QT" = 1 ]; then
     log "removing Qt toolchains in /opt"
-    sudo rm -rf /opt/qt611 /opt/qt610 /opt/qt692
+    sudo rm -rf /opt/qt6 /opt/qt611 /opt/qt610 /opt/qt692
 else
     warn "Qt toolchains kept in /opt (use --purge-qt to remove)"
 fi
