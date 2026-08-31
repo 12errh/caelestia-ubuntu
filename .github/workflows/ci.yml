@@ -58,25 +58,30 @@ jobs:
           remove-codeql: true
           remove-docker-images: true
 
+      - uses: actions/checkout@v4
+
       - name: Redirect heavy writes to the expanded build disk
-        # `/` only has ~3 GB free after maximize; the big disk is at the
-        # workspace path. Point the installer's largest consumers there:
+        # Runs AFTER checkout: the redirect creates a root-owned dir tree under
+        # the workspace, which would otherwise make checkout's workspace-cleanup
+        # fail with EACCES. `/` only has ~3 GB free after maximize; the big disk
+        # is mounted at the workspace path, so point the installer's largest
+        # consumers there:
         #   /opt/qt611  (~2 GB Qt download)        -> build-disk/opt-qt
         #   /usr/local  (built binaries install)   -> build-disk/usr-local
         #   $HOME       (source clones + build caches + configs) -> build-disk/home
-        # This keeps `/` usage small enough to build successfully.
+        # User-facing dirs (home, opt-qt) are chowned to the runner so the
+        # non-sudo parts of setup.sh can write there.
         run: |
           set -e
           DISK="${{ github.workspace }}/build-disk"
           sudo mkdir -p "$DISK/opt-qt" "$DISK/usr-local" "$DISK/home"
-          sudo rm -rf /opt/qt611
-          sudo ln -s "$DISK/opt-qt" /opt/qt611
           sudo cp -a /usr/local/. "$DISK/usr-local/"
           sudo rm -rf /usr/local
           sudo ln -s "$DISK/usr-local" /usr/local
+          sudo rm -rf /opt/qt611
+          sudo ln -s "$DISK/opt-qt" /opt/qt611
+          sudo chown -R "$(id -u):$(id -g)" "$DISK/home" "$DISK/opt-qt"
           echo "HOME=$DISK/home" >> "$GITHUB_ENV"
-
-      - uses: actions/checkout@v4
 
       - name: Run installer (build everything + deploy configs)
         # --skip-fonts avoids the network font downloads (irrelevant to the
