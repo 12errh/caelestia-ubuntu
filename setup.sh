@@ -106,7 +106,7 @@ stage_apt() {
     # Core: every one of these must install for the build to succeed.
     sudo apt-get install -y \
         build-essential cmake ninja-build git curl wget pkg-config patchelf unzip \
-        libgl1-mesa-dev libdrm-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+        libgl1-mesa-dev libdrm-dev libgbm-dev libwayland-dev wayland-protocols libxkbcommon-dev \
         libunwind-dev \
         libpipewire-0.3-dev libspa-0.2-dev libaubio-dev \
         libqalculate-dev libsensors-dev \
