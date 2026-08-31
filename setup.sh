@@ -77,7 +77,7 @@ preflight() {
         *) die "Qt $QT_VERSION is too old — Caelestia master needs >= 6.11 (DoubleSpinBox)" ;;
     esac
     QT_ROOT="/opt/qt${QT_VERSION%%.*}"
-    $SKIP_QT && [ ! -x "$QT_ROOT/$QT_VERSION/gcc_64/bin/qmake6" ] && \
+    [ "$SKIP_QT" = 1 ] && [ ! -x "$QT_ROOT/$QT_VERSION/gcc_64/bin/qmake6" ] && \
         die "--skip-qt given but Qt $QT_VERSION is not installed at $QT_ROOT"
 
     log "sudo password required for package installs and /opt, /usr/local writes"
@@ -88,17 +88,19 @@ preflight() {
 
 # ----------------------------------------------------------------------------
 stage_apt() {
-    $SKIP_APT && { warn "skipping apt stage"; return 0; }
+    [ "$SKIP_APT" = 1 ] && { warn "skipping apt stage"; return 0; }
     log "stage: apt packages"
     sudo apt-get update -y
 
-    if ! apt-cache policy hyprland 2>/dev/null | grep -q 'Candidate:'; then
-        die "apt cache broken"
-    fi
+    # hyprland lives in the cppiber PPA, not the default Ubuntu repos, so the
+    # PPA must be present before we can verify the package is installable.
     if ! grep -rq 'cppiber/hyprland' /etc/apt/sources.list.d/ 2>/dev/null; then
         sudo apt-get install -y software-properties-common
         sudo add-apt-repository -y ppa:cppiber/hyprland
         sudo apt-get update -y
+    fi
+    if ! apt-cache policy hyprland 2>/dev/null | grep -q 'Candidate:'; then
+        die "hyprland not available after adding PPA — apt/PPA broken"
     fi
 
     # Core: every one of these must install for the build to succeed.
@@ -131,7 +133,7 @@ stage_apt() {
 
 # ----------------------------------------------------------------------------
 stage_qt() {
-    $SKIP_QT && { warn "skipping Qt stage"; return 0; }
+    [ "$SKIP_QT" = 1 ] && { warn "skipping Qt stage"; return 0; }
     log "stage: Qt $QT_VERSION (aqtinstall) -> $QT_ROOT"
     if [ -x "$QT_ROOT/$QT_VERSION/gcc_64/bin/qmake6" ]; then
         ok "Qt $QT_VERSION already installed"
@@ -296,7 +298,7 @@ stage_cli() {
 }
 
 stage_fonts() {
-    $SKIP_FONTS && { warn "skipping fonts"; return 0; }
+    [ "$SKIP_FONTS" = 1 ] && { warn "skipping fonts"; return 0; }
     log "stage: fonts"
     local fd="$HOME/.local/share/fonts/caelestia"
     mkdir -p "$fd"
@@ -319,7 +321,7 @@ stage_fonts() {
 
 # ----------------------------------------------------------------------------
 stage_config() {
-    $SKIP_CONFIG && { warn "skipping config deploy"; return 0; }
+    [ "$SKIP_CONFIG" = 1 ] && { warn "skipping config deploy"; return 0; }
     log "stage: deploying theme + configs"
 
     if ask "Deploy the maintainer's theme to ~/.config (backs up anything existing first)?" || [ "$ASSUME_YES" = 1 ]; then
