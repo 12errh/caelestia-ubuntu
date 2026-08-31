@@ -109,7 +109,7 @@ stage_apt() {
         libgl1-mesa-dev libdrm-dev libwayland-dev wayland-protocols libxkbcommon-dev \
         libunwind-dev \
         libpipewire-0.3-dev libspa-0.2-dev libaubio-dev \
-        libqalculate-dev qalculate libsensors-dev \
+        libqalculate-dev libsensors-dev \
         libasound2-dev libpulse-dev libfftw3-dev libinih-dev \
         autoconf automake libtool meson libffi-dev libexpat1-dev libxml2-dev \
         hyprland hypridle hyprlock hyprpaper xdg-desktop-portal-hyprland \
@@ -118,7 +118,7 @@ stage_apt() {
     # Nice-to-haves: install individually so one missing package on an older
     # release never fails the whole stage.
     local p
-    for p in libjemalloc-dev foot wlogout brightnessctl ddcutil lm-sensors swappy policykit-1-gnome; do
+    for p in libjemalloc-dev foot wlogout brightnessctl ddcutil lm-sensors swappy policykit-1-gnome qalculate; do
         sudo apt-get install -y "$p" >/dev/null 2>&1 || warn "optional package unavailable on this release: $p"
     done
 
