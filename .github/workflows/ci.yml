@@ -87,7 +87,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "$DISK/home" "$DISK/opt-qt"
           echo "HOME=$DISK/home" >> "$GITHUB_ENV"
 
-       - name: Run installer (build everything + deploy configs)
+      - name: Run installer (build everything + deploy configs)
         # --skip-fonts avoids the network font downloads (irrelevant to the
         # build/run test and flaky behind CDNs). Everything else runs for real.
         # --ignore-space skips the 8 GB / check (space lives on the mounted
