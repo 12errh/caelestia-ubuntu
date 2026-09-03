@@ -7,8 +7,8 @@
 
 if [ "$1" = "post" ]; then
     sleep 3
-    if pgrep -u 1000 -f "qs -c caelestia" > /dev/null 2>&1; then
-        pkill -TERM -u 1000 -f "qs -c caelestia" 2>/dev/null
+    if pgrep -u __UID__ -f "qs -c caelestia" > /dev/null 2>&1; then
+        pkill -TERM -u __UID__ -f "qs -c caelestia" 2>/dev/null
         logger -t caelestia-resume "Bounced caelestia shell after wake ($2)"
     fi
 fi

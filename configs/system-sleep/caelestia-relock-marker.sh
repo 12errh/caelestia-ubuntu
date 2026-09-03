@@ -1,12 +1,12 @@
 #!/bin/bash
-# Touch /run/user/1000/caelestia-resume on post-suspend so the user
+# Touch /run/user/__UID__/caelestia-resume on post-suspend so the user
 # service drop-in knows the upcoming ExecStartPost is a post-resume
 # restart (and not a cold Hyprland login).
 #
 # Run as root by systemd-sleep; the marker is a plain file owned by
 # the user, consumed by ~/.local/bin/caelestia-relock.sh.
 
-USER_UID=1000
+USER_UID=__UID__
 MARKER="/run/user/$USER_UID/caelestia-resume"
 
 logger -t caelestia-relock-marker "hook invoked: arg1=$1 arg2=$2"

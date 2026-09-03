@@ -26,6 +26,7 @@ SRC_ROOT="$HOME/.cache/caelestia-ubuntu-build"
 QT_ROOT=""
 ASSUME_YES=0
 SKIP_APT=0; SKIP_QT=0; SKIP_FONTS=0; SKIP_CONFIG=0; IGNORE_SPACE=0
+QT_REQUESTED=0
 
 # ----------------------------------------------------------------------------
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -45,7 +46,7 @@ while [ $# -gt 0 ]; do
         --ignore-space) IGNORE_SPACE=1 ;;
         --qt-version)
             [ -n "${2:-}" ] || die "--qt-version needs a value (e.g. 6.11.2)"
-            QT_VERSION="$2"; shift ;;
+            QT_VERSION="$2"; QT_REQUESTED=1; shift ;;
         -h|--help)     grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
@@ -77,6 +78,19 @@ preflight() {
         *) die "Qt $QT_VERSION is too old — Caelestia master needs >= 6.11 (DoubleSpinBox)" ;;
     esac
     QT_ROOT="/opt/qt${QT_VERSION%%.*}"
+    # Reuse the Qt toolchain the existing quickshell was built against when the
+    # user didn't explicitly pick a version — avoids re-downloading Qt on re-runs
+    # and ignores stale /opt/qt6/6.x dirs left by previous installers.
+    if [ "$QT_REQUESTED" = 0 ] && [ -x /usr/local/bin/qs ]; then
+        local _qtdir
+        _qtdir=$(ldd /usr/local/bin/qs 2>/dev/null | grep -oE '/opt/qt[0-9]+/[0-9.]+/gcc_64' | head -1 || true)
+        if [ -n "$_qtdir" ] && [ -x "$_qtdir/bin/qmake6" ]; then
+            QT_ROOT="${_qtdir%/*/*}"               # -> /opt/qt611
+            QT_VERSION="${_qtdir#*/opt/qt*/}"      # -> 6.11.2/gcc_64
+            QT_VERSION="${QT_VERSION%%/*}"         # -> 6.11.2
+            ok "reusing Qt $QT_VERSION at $QT_ROOT (from ldd qs)"
+        fi
+    fi
     [ "$SKIP_QT" = 1 ] && [ ! -x "$QT_ROOT/$QT_VERSION/gcc_64/bin/qmake6" ] && \
         die "--skip-qt given but Qt $QT_VERSION is not installed at $QT_ROOT"
 
@@ -99,7 +113,7 @@ stage_apt() {
         sudo add-apt-repository -y ppa:cppiber/hyprland
         sudo apt-get update -y
     fi
-    if ! apt-cache policy hyprland 2>/dev/null | grep -q 'Candidate:'; then
+    if ! apt-cache show hyprland >/dev/null 2>&1; then
         die "hyprland not available after adding PPA — apt/PPA broken"
     fi
 
@@ -113,12 +127,22 @@ stage_apt() {
         libasound2-dev libpulse-dev libfftw3-dev libinih-dev libiniparser-dev \
         autoconf automake libtool meson libffi-dev libexpat1-dev libxml2-dev libcli11-dev \
         hyprland hypridle hyprlock hyprpaper xdg-desktop-portal-hyprland \
-        xdg-desktop-portal-gtk network-manager
+        xdg-desktop-portal-gtk network-manager \
+        dbus
+
+    # Quickshell build deps: the Wayland/dmabuf (VulkanHeaders), polkit and X11
+    # modules are REQUIRED by default, so their -dev packages must be present or
+    # configure fails. libjemalloc-dev is also required (quickshell links
+    # jemalloc on Linux with USE_JEMALLOC=ON, which is the default).
+    sudo apt-get install -y \
+        libvulkan-dev libxcb1-dev libglib2.0-dev \
+        libpolkit-agent-1-dev libpolkit-gobject-1-dev \
+        libjemalloc-dev
 
     # Nice-to-haves: install individually so one missing package on an older
     # release never fails the whole stage.
     local p
-    for p in libjemalloc-dev foot wlogout brightnessctl ddcutil lm-sensors swappy policykit-1-gnome qalculate; do
+    for p in foot wlogout brightnessctl ddcutil lm-sensors swappy policykit-1-gnome qalculate; do
         sudo apt-get install -y "$p" >/dev/null 2>&1 || warn "optional package unavailable on this release: $p"
     done
 
@@ -187,8 +211,8 @@ stage_wayland() {
 stage_cava() {
     log "stage: libcava (visualiser backend)"
     export PKG_CONFIG_PATH="/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-    if pkg-config --exists cavacore 2>/dev/null || pkg-config --exists cava 2>/dev/null; then
-        ok "libcava already present ($(pkg-config --modversion cava 2>/dev/null || pkg-config --modversion cavacore))"
+    if pkg-config --exists libcava 2>/dev/null; then
+        ok "libcava already present ($(pkg-config --modversion libcava))"
         return 0
     fi
     if [ ! -d "$SRC_ROOT/cava" ]; then
@@ -339,21 +363,38 @@ stage_config() {
                  "$HOME/.config/quickshell" "$HOME/.local/bin" \
                  "$HOME/Pictures/Wallpapers" "$HOME/Pictures/wallpapers"
 
-        sed "s|__HOME__|$HOME|g" "$REPO_DIR/configs/hypr/hyprland.conf"      > "$HOME/.config/hypr/hyprland.conf"
-        cp "$REPO_DIR/configs/hypr/perf-overrides.conf"                       "$HOME/.config/hypr/"
-        cp "$REPO_DIR/configs/hypr/optional/hypridle.conf"                    "$HOME/.config/hypr/"
-        cp "$REPO_DIR/configs/hypr/optional/hyprpaper.conf"                   "$HOME/.config/hypr/"
-        cp "$REPO_DIR/configs/caelestia/shell.json"                           "$HOME/.config/caelestia/shell.json"
+        local qt_prefix="$QT_ROOT/$QT_VERSION/gcc_64"
+        local run_uid; run_uid="$(id -u)"
+        # Deploy templated configs: __HOME__ -> user home, __QT__ -> Qt prefix,
+        # __UID__ -> invoking uid (system-sleep hooks run as root). %h/%U in the
+        # systemd drop-in resolve per-user at runtime.
+        template() { sed "s|__HOME__|$HOME|g; s|__QT__|$qt_prefix|g"; }
+
+        sed "s|__HOME__|$HOME|g; s|__QT__|$qt_prefix|g" \
+            "$REPO_DIR/configs/hypr/hyprland.conf"              > "$HOME/.config/hypr/hyprland.conf"
+        cp "$REPO_DIR/configs/hypr/perf-overrides.conf"         "$HOME/.config/hypr/"
+        template < "$REPO_DIR/configs/hypr/optional/hypridle.conf"    > "$HOME/.config/hypr/hypridle.conf"
+        template < "$REPO_DIR/configs/hypr/optional/hyprpaper.conf"    > "$HOME/.config/hypr/hyprpaper.conf"
+        template < "$REPO_DIR/configs/caelestia/shell.json"           > "$HOME/.config/caelestia/shell.json"
         echo '{ }' > "$HOME/.config/caelestia/monitors/eDP-1/shell.json"
 
-        cp "$REPO_DIR/configs/systemd/user/caelestia-shell.service"           "$HOME/.config/systemd/user/"
+        template < "$REPO_DIR/configs/systemd/user/caelestia-shell.service" \
+            > "$HOME/.config/systemd/user/caelestia-shell.service"
         mkdir -p "$HOME/.config/systemd/user/caelestia-shell.service.d"
-        cp "$REPO_DIR/configs/systemd/user/caelestia-shell.service.d/"*.conf  "$HOME/.config/systemd/user/caelestia-shell.service.d/"
-        cp "$REPO_DIR/configs/bin/caelestia-relock.sh" "$HOME/.local/bin/" && chmod +x "$HOME/.local/bin/caelestia-relock.sh"
+        cp "$REPO_DIR/configs/systemd/user/caelestia-shell.service.d/"*.conf \
+            "$HOME/.config/systemd/user/caelestia-shell.service.d/"
+        cp "$REPO_DIR/configs/bin/caelestia-relock.sh" "$HOME/.local/bin/" \
+            && chmod +x "$HOME/.local/bin/caelestia-relock.sh"
 
-        sudo cp "$REPO_DIR/configs/system-sleep/caelestia-relock-marker.sh" \
-                "$REPO_DIR/configs/system-sleep/caelestia-shell-restart.sh" /usr/lib/systemd/system-sleep/
-        sudo chmod +x /usr/lib/systemd/system-sleep/caelestia-*.sh
+        # system-sleep hooks run as root; bake the invoking user's uid in.
+        sed "s|__UID__|$run_uid|g" \
+            "$REPO_DIR/configs/system-sleep/caelestia-shell-restart.sh" \
+            | sudo tee /usr/lib/systemd/system-sleep/caelestia-shell-restart.sh >/dev/null
+        sed "s|__UID__|$run_uid|g" \
+            "$REPO_DIR/configs/system-sleep/caelestia-relock-marker.sh" \
+            | sudo tee /usr/lib/systemd/system-sleep/caelestia-relock-marker.sh >/dev/null
+        sudo chmod +x /usr/lib/systemd/system-sleep/caelestia-shell-restart.sh \
+                          /usr/lib/systemd/system-sleep/caelestia-relock-marker.sh
 
         cp "$REPO_DIR/configs/wallpapers/wallpaper.jpg" "$HOME/Pictures/Wallpapers/wallpaper.jpg"
         cp "$REPO_DIR/configs/wallpapers/wallpaper.jpg" "$HOME/Pictures/wallpapers/wallpaper.jpg"
@@ -405,13 +446,46 @@ stage_verify() {
         && ok "Qt webp support present" || { warn "webp plugin missing"; fail=1; }
     grep -q wl_fixes /usr/local/include/wayland-client-protocol.h 2>/dev/null \
         && ok "wayland headers ok (wl_fixes)" || { warn "wayland headers incomplete"; fail=1; }
-    fc-list 2>/dev/null | grep -qiE 'Material Symbols' \
-        && ok "Material Symbols font present" || { warn "Material Symbols font missing — icons will be blank"; fail=1; }
-    [ -f "$HOME/Pictures/wallpapers/wallpaper.jpg" ] \
-        && ok "wallpaper deployed" || { warn "wallpaper missing"; fail=1; }
+    if [ "$SKIP_FONTS" = 1 ]; then
+        warn "fonts skipped (--skip-fonts), skipping font checks"
+    else
+        fc-list 2>/dev/null | grep -qiE 'Material Symbols' \
+            && ok "Material Symbols font present" || { warn "Material Symbols font missing — icons will be blank"; fail=1; }
+    fi
+    if [ "$SKIP_CONFIG" = 1 ]; then
+        warn "config deploy skipped (--skip-config), skipping wallpaper checks"
+    else
+        [ -f "$HOME/Pictures/wallpapers/wallpaper.jpg" ] \
+            && ok "wallpaper deployed" || { warn "wallpaper missing"; fail=1; }
+    fi
     hyprctl version >/dev/null 2>&1 \
         && ok "hyprland on PATH" || ok "hyprland installed (session entry appears after re-login)"
     [ "$fail" = 0 ] && ok "ALL CHECKS PASSED" || die "one or more checks failed — see the ! lines above"
+}
+
+# ----------------------------------------------------------------------------
+stage_manifest() {
+    # Record what was installed so update.sh can detect drift without rebuilding
+    # the whole toolchain. Re-runs overwrite the file (idempotent).
+    local manifest_dir="$HOME/.local/share/caelestia-ubuntu"
+    local manifest="$manifest_dir/manifest"
+    local rev
+    mkdir -p "$manifest_dir"
+    : > "$manifest"
+    {
+        echo "QT_VERSION=$QT_VERSION"
+        echo "QT_ROOT=$QT_ROOT"
+        echo "QT_PREFIX=$QT_ROOT/$QT_VERSION/gcc_64"
+        echo "SRC_ROOT=$SRC_ROOT"
+        echo "INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        rev=$(git -C "$SRC_ROOT/quickshell" rev-parse --short=12 HEAD 2>/dev/null); echo "quickshell=$rev"
+        rev=$(git -C "$HOME/.config/quickshell/caelestia" rev-parse --short=12 HEAD 2>/dev/null); echo "caelestia=$rev"
+        rev=$(git -C "$SRC_ROOT/m3shapes" rev-parse --short=12 HEAD 2>/dev/null); echo "m3shapes=$rev"
+        rev=$(git -C "$SRC_ROOT/cava" rev-parse --short=12 HEAD 2>/dev/null); echo "cava=$rev"
+        if have uv; then rev=$(uv tool list 2>/dev/null | awk '/caelestia-cli/{print $2}'); echo "caelestia_cli=$rev"
+        elif have pipx; then rev=$(pipx list --format=json 2>/dev/null | jq -r '.installed."caelestia-cli".version' 2>/dev/null); echo "caelestia_cli=$rev"; fi
+    } >> "$manifest"
+    ok "manifest written to $m (run update.sh to check for upgrades)"
 }
 
 # ----------------------------------------------------------------------------
@@ -429,6 +503,7 @@ main() {
     stage_config
     sudo ldconfig
     stage_verify
+    stage_manifest
 
     echo
     log "install complete. next steps:"
@@ -442,6 +517,7 @@ main() {
     echo
     echo "  GNOME stays untouched — pick 'Zorin'/'Ubuntu' in GDM any time."
     echo "  Qt $QT_VERSION lives in $QT_ROOT (safe to delete only after uninstalling this setup)."
+    echo "  update the shell anytime with: $(dirname "$0")/update.sh"
     echo "  uninstall any time with: $(dirname "$0")/uninstall.sh"
 }
 

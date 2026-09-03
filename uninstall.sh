@@ -39,11 +39,16 @@ sudo rm -f /usr/local/lib/pkgconfig/cava.pc /usr/local/lib/x86_64-linux-gnu/pkgc
 sudo ldconfig
 
 if [ "$PURGE_QT" = 1 ]; then
-    log "removing Qt toolchains in /opt"
-    sudo rm -rf /opt/qt6 /opt/qt611 /opt/qt610 /opt/qt692
+    log "removing Qt toolchains in /opt (any /opt/qt* install)"
+    for q in /opt/qt*; do
+        [ -e "$q" ] && sudo rm -rf "$q"
+    done
 else
     warn "Qt toolchains kept in /opt (use --purge-qt to remove)"
 fi
+
+log "removing manifest directory"
+rm -rf "$HOME/.local/share/caelestia-ubuntu"
 
 log "preserving user configs"
 ts=$(date +%Y%m%d-%H%M%S)
