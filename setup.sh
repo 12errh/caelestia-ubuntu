@@ -130,14 +130,13 @@ stage_apt() {
         xdg-desktop-portal-gtk network-manager \
         dbus
 
-    # Quickshell build deps: the Wayland/dmabuf (VulkanHeaders), polkit and X11
-    # modules are REQUIRED by default, so their -dev packages must be present or
-    # configure fails. libjemalloc-dev is also required (quickshell links
-    # jemalloc on Linux with USE_JEMALLOC=ON, which is the default).
+    # Quickshell build deps: VulkanHeaders (Vulkan), X11, glib, polkit, jemalloc,
+    # and PAM (the pam service plugin ships against libpam). These are all
+    # REQUIRED by default, so the -dev packages must be present or configure fails.
     sudo apt-get install -y \
         libvulkan-dev libxcb1-dev libglib2.0-dev \
         libpolkit-agent-1-dev libpolkit-gobject-1-dev \
-        libjemalloc-dev
+        libjemalloc-dev libpam0g-dev
 
     # Nice-to-haves: install individually so one missing package on an older
     # release never fails the whole stage.
