@@ -360,6 +360,7 @@ stage_config() {
 
         mkdir -p "$HOME/.config/hypr" "$HOME/.config/caelestia/monitors/eDP-1" \
                  "$HOME/.config/quickshell" "$HOME/.local/bin" \
+                 "$HOME/.config/systemd/user" \
                  "$HOME/Pictures/Wallpapers" "$HOME/Pictures/wallpapers"
 
         local qt_prefix="$QT_ROOT/$QT_VERSION/gcc_64"
