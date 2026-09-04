@@ -6,7 +6,7 @@ After=graphical-session.target
 # several restarts in a row — but cap the loop so a dead compositor cannot
 # cause an endless 3-second restart spin.
 StartLimitIntervalSec=60
-StartLimitBurst=5
+StartLimitBurst=8
 
 [Service]
 # Wait for Hyprland/Wayland to be ready before launching

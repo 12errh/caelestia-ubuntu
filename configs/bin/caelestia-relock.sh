@@ -6,13 +6,18 @@
 # ext_session_lock_v1 lock, so the lock screen is missing until manually
 # locked. This re-establishes it so the lock is back when the lid reopens.
 #
-# Runs as the logged-in user (invoked from a root-owned systemd-sleep hook
-# via `setpriv --reuid`), so no privilege escalation is needed.
+# Runs as the logged-in user (systemd user service ExecStartPost), so no
+# privilege escalation is needed.
 #
 # Behaviour:
 #   - If /run/user/<uid>/caelestia-resume marker exists, the qs process was
-#     bounced by the sleep hook, so re-acquire the lock (mark consumed).
+#     bounced by the sleep hook, so re-acquire the lock (mark consumed ONLY
+#     once the lock is confirmed held).
 #   - If no marker exists, this is a cold Hyprland start — do NOTHING.
+#   - Hyprland option misc:allow_session_lock_restore is forced on: after a
+#     lock client dies (qs bounced on wake) Hyprland refuses a new lock unless
+#     this is set — that refusal is what leaves the frozen "lock screen died"
+#     screen. With it on, Caelestia can always re-take the session lock.
 #   - While waiting, keep the display blanked (DPMS off) so the user does
 #     not see the unlocked desktop between resume and lock acquisition.
 #     The display is turned back on once the lock UI is up.
@@ -22,11 +27,20 @@
 TARGET_UID="${1:-$(id -u)}"
 MAX_WAIT=30
 MARKER="/run/user/${TARGET_UID}/caelestia-resume"
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${TARGET_UID}}"
 
 if ! NAME=$(id -un "$TARGET_UID" 2>/dev/null); then
     echo "caelestia-relock: unknown uid $TARGET_UID" >&2
     exit 1
 fi
+
+# Resolve the running Hyprland instance signature (single instance expected).
+hypr() {
+    local sig
+    sig=$(ls -d "${XDG_RUNTIME_DIR}/hypr"/*/ 2>/dev/null | head -1 | sed 's:.*/::; s:/$::')
+    [ -n "$sig" ] || return 1
+    HYPRLAND_INSTANCE_SIGNATURE="$sig" hyprctl "$@"
+}
 
 # Cold start: no marker, do not auto-lock.
 if [ ! -f "$MARKER" ]; then
@@ -35,12 +49,11 @@ fi
 
 # Blank the display so the unlocked desktop is not visible while we wait
 # for quickshell to come back and re-acquire the session lock.
-# (Only run if Hyprland is responding; otherwise this hangs.)
-if command -v hyprctl >/dev/null 2>&1; then
-    HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-}" \
-    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
-        hyprctl dispatch dpms off >/dev/null 2>&1 || true
-fi
+hypr dispatch dpms off >/dev/null 2>&1 || true
+
+# Allow re-locking after a dead lock screen (see header). Without this the
+# lock request below is refused and the user is stuck on the frozen screen.
+hypr keyword misc:allow_session_lock_restore 1 >/dev/null 2>&1 || true
 
 cleanup() {
     # Restore display so the user can see the lock UI / unlocked desktop.
@@ -48,21 +61,24 @@ cleanup() {
     # before turning the panel back on, otherwise the user briefly sees
     # an unfilled screencopy background instead of the lock UI.
     sleep 1
-    if command -v hyprctl >/dev/null 2>&1; then
-        HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-}" \
-        XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
-            hyprctl dispatch dpms on >/dev/null 2>&1 || true
-    fi
+    hypr dispatch dpms on >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-# Wait for quickshell to be running and IPC-ready.
+# Wait for quickshell to be running and IPC-ready, then lock. The marker is
+# removed only after `lock lock` is confirmed via `isLocked`, so if quickshell
+# crashes again right after (crash-loop on resume) the marker is still present
+# and the next service restart re-attempts the lock.
+locked_ok() {
+    [ "$(qs -c caelestia ipc call lock isLocked 2>/dev/null)" = "true" ]
+}
+
 deadline=$(( $(date +%s) + MAX_WAIT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     if pgrep -u "$NAME" -f "qs -c caelestia" >/dev/null 2>&1; then
-        if qs -c caelestia ipc call lock isLocked >/dev/null 2>&1; then
+        qs -c caelestia ipc call lock lock >/dev/null 2>&1
+        if locked_ok; then
             rm -f "$MARKER"
-            qs -c caelestia ipc call lock lock >/dev/null 2>&1
             exit 0
         fi
     fi

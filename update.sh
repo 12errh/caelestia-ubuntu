@@ -72,6 +72,7 @@ MANIFEST_DIR="$HOME/.local/share/caelestia-ubuntu"; mkdir -p "$MANIFEST_DIR"
 MANIFEST="$MANIFEST_DIR/manifest"
 
 QS_REPO="https://git.outfoxxed.me/quickshell/quickshell";     QS_BRANCH="master"
+QS_MIRROR="https://github.com/outfoxxed/quickshell"
 CAEL_REPO="https://github.com/caelestia-dots/shell";           CAEL_BRANCH="main"
 M3S_REPO="https://github.com/soramanew/m3shapes";              M3S_BRANCH="main"
 CAVA_REPO="https://github.com/LukashonakV/cava";               CAVA_BRANCH="master"
@@ -134,7 +135,14 @@ prepare_clone() {  # $1=dir $2=url $3=branch
     if [ ! -d "$dir/.git" ]; then
         [ "$ACTION" = "check" ] && { echo ""; return 0; }
         log "cloning $(basename "$dir")"
-        git clone "$url" "$dir" >/dev/null 2>&1 || die "clone failed: $url"
+        if ! git clone "$url" "$dir" >/dev/null 2>&1; then
+            if [ "$url" = "$QS_REPO" ]; then
+                warn "quickshell upstream unreachable — trying GitHub mirror"
+                git clone "$QS_MIRROR" "$dir" >/dev/null 2>&1 || die "clone failed: $QS_MIRROR"
+            else
+                die "clone failed: $url"
+            fi
+        fi
     elif [ "$ACTION" = "apply" ]; then
         git -C "$dir" fetch origin >/dev/null 2>&1 || warn "git fetch failed for $dir"
         git -C "$dir" checkout "$branch" >/dev/null 2>&1 || true

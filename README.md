@@ -122,6 +122,10 @@ toolchain, and restarts the running shell service only when something changed
 *and* the service is active. Qt itself is a fixed toolchain — bump it with
 `./setup.sh --qt-version X`.
 
+> `update.sh` rebuilds *sources* only. To refresh the shipped configs/hooks
+> after a repo change (e.g. the lock-restore fix), re-run the config deploy:
+> `./setup.sh --skip-apt --skip-qt --skip-fonts --yes`.
+
 | Flag | Effect |
 |---|---|
 | `--check` | read-only status report (no clones, no builds) |
@@ -147,9 +151,8 @@ GNOME is never modified by either script.
 - **`qs` IPC binds do nothing**: ensure no global `LD_LIBRARY_PATH` points at an
   old Qt; the binary's baked RPATH resolves Qt on its own.
 - **`hyprctl configerrors` looks wrong**: run `hyprctl reload`.
-- **Lock screen doesn't appear after lid resume**: the systemd-sleep hooks are
-  templated with the installing user's id at install time — re-run
-  `./setup.sh --skip-config` if your uid isn't 1000.
+- **Lock screen doesn't appear after lid resume / frozen "lock screen died" screen**: the installer ships `misc.allow_session_lock_restore = true` plus the systemd-sleep hooks that re-acquire the Caelestia lock on wake — if you still hit it, the hooks were templated with the installing user's id at install time. Re-run `./setup.sh --yes` to re-deploy them if your uid isn't 1000.
+- **`hyprlock` exits immediately when run manually**: the repo now ships a valid `~/.config/hypr/hyprlock.conf`, but hyprlock can't lock while Caelestia already holds the session lock (that's normal — Super+L is the Caelestia lock).
 - **Missing Calculator action in the launcher**: `sudo apt install qalculate`
   (the `qalc` CLI, not just the library).
 - Wayland-native Qt 6.11 apps and GNOME apps are unaffected by this install —

@@ -246,10 +246,19 @@ build_cmake() {  # $1=srcdir $2=prefix $3=extra-args... ; runs configure+build+i
 
 stage_quickshell() {
     log "stage: quickshell (git master)"
+    # Primary clone host is the upstream self-hosted forgejo; fall back to the
+    # GitHub mirror so a common user is never blocked by one host being down.
     if [ ! -d "$SRC_ROOT/quickshell" ]; then
-        git clone https://git.outfoxxed.me/quickshell/quickshell "$SRC_ROOT/quickshell"
+        git clone https://git.outfoxxed.me/quickshell/quickshell "$SRC_ROOT/quickshell" 2>/dev/null \
+            || { warn "git.outfoxxed.me unreachable — cloning GitHub mirror"; \
+                 git clone https://github.com/outfoxxed/quickshell "$SRC_ROOT/quickshell" \
+                    || die "quickshell clone failed (both upstream and mirror)"; }
     else
-        git -C "$SRC_ROOT/quickshell" pull --ff-only || git -C "$SRC_ROOT/quickshell" fetch origin
+        git -C "$SRC_ROOT/quickshell" pull --ff-only 2>/dev/null \
+            || git -C "$SRC_ROOT/quickshell" fetch origin 2>/dev/null \
+            || { warn "quickshell upstream unreachable — switching remote to GitHub mirror"; \
+                 git -C "$SRC_ROOT/quickshell" remote set-url origin https://github.com/outfoxxed/quickshell; \
+                 git -C "$SRC_ROOT/quickshell" pull --ff-only 2>/dev/null || true; }
     fi
     # -DCMAKE_INSTALL_LIBDIR=lib keeps quickshell's own libs under /usr/local/lib
     # so qs's $ORIGIN/../lib RPATH resolves them (multiarch libdir isn't on RPATH).
@@ -388,6 +397,7 @@ stage_config() {
         cp "$REPO_DIR/configs/hypr/perf-overrides.conf"         "$HOME/.config/hypr/"
         template < "$REPO_DIR/configs/hypr/optional/hypridle.conf"    > "$HOME/.config/hypr/hypridle.conf"
         template < "$REPO_DIR/configs/hypr/optional/hyprpaper.conf"    > "$HOME/.config/hypr/hyprpaper.conf"
+        template < "$REPO_DIR/configs/hypr/hyprlock.conf"             > "$HOME/.config/hypr/hyprlock.conf"
         template < "$REPO_DIR/configs/caelestia/shell.json"           > "$HOME/.config/caelestia/shell.json"
         echo '{ }' > "$HOME/.config/caelestia/monitors/eDP-1/shell.json"
 
@@ -438,7 +448,16 @@ stage_config() {
 
         # hypridle must NOT run user-wide: Caelestia IdleMonitors owns idle/lock/suspend
         sudo systemctl --global disable hypridle.service 2>/dev/null || true
+
+        # GNOME's portal would claim the xdg-desktop-portal role inside the
+        # Hyprland session and fight the hyprland/gtk portals (screencast, file
+        # dialogs). Mask it and let the session portals own the role — this is
+        # what the maintainer's working setup does. GNOME itself is unaffected
+        # because only one graphical session per user is active at a time.
+        systemctl --user mask xdg-desktop-portal-gnome 2>/dev/null || true
         systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user restart xdg-desktop-portal xdg-desktop-portal-hyprland \
+            xdg-desktop-portal-gtk 2>/dev/null || true
     fi
     ok "config stage done"
 }
