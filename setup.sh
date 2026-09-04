@@ -478,12 +478,12 @@ stage_manifest() {
         echo "QT_PREFIX=$QT_ROOT/$QT_VERSION/gcc_64"
         echo "SRC_ROOT=$SRC_ROOT"
         echo "INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        rev=$(git -C "$SRC_ROOT/quickshell" rev-parse --short=12 HEAD 2>/dev/null); echo "quickshell=$rev"
-        rev=$(git -C "$HOME/.config/quickshell/caelestia" rev-parse --short=12 HEAD 2>/dev/null); echo "caelestia=$rev"
-        rev=$(git -C "$SRC_ROOT/m3shapes" rev-parse --short=12 HEAD 2>/dev/null); echo "m3shapes=$rev"
-        rev=$(git -C "$SRC_ROOT/cava" rev-parse --short=12 HEAD 2>/dev/null); echo "cava=$rev"
-        if have uv; then rev=$(uv tool list 2>/dev/null | awk '/caelestia-cli/{print $2}'); echo "caelestia_cli=$rev"
-        elif have pipx; then rev=$(pipx list --format=json 2>/dev/null | jq -r '.installed."caelestia-cli".version' 2>/dev/null); echo "caelestia_cli=$rev"; fi
+        rev=$(git -C "$SRC_ROOT/quickshell" rev-parse --short=12 HEAD 2>/dev/null || true); echo "quickshell=$rev"
+        rev=$(git -C "$HOME/.config/quickshell/caelestia" rev-parse --short=12 HEAD 2>/dev/null || true); echo "caelestia=$rev"
+        rev=$(git -C "$SRC_ROOT/m3shapes" rev-parse --short=12 HEAD 2>/dev/null || true); echo "m3shapes=$rev"
+        rev=$(git -C "$SRC_ROOT/cava" rev-parse --short=12 HEAD 2>/dev/null || true); echo "cava=$rev"
+        if have uv; then rev=$(uv tool list 2>/dev/null | awk '/caelestia-cli/{print $2}' || true); echo "caelestia_cli=$rev"
+        elif have pipx; then rev=$(pipx list --format=json 2>/dev/null | jq -r '.installed."caelestia-cli".version' 2>/dev/null || true); echo "caelestia_cli=$rev"; fi
     } >> "$manifest"
     ok "manifest written to $m (run update.sh to check for upgrades)"
 }
