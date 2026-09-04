@@ -485,7 +485,7 @@ stage_manifest() {
         if have uv; then rev=$(uv tool list 2>/dev/null | awk '/caelestia-cli/{print $2}' || true); echo "caelestia_cli=$rev"
         elif have pipx; then rev=$(pipx list --format=json 2>/dev/null | jq -r '.installed."caelestia-cli".version' 2>/dev/null || true); echo "caelestia_cli=$rev"; fi
     } >> "$manifest"
-    ok "manifest written to $m (run update.sh to check for upgrades)"
+    ok "manifest written to $manifest (run update.sh to check for upgrades)"
 }
 
 # ----------------------------------------------------------------------------
