@@ -115,12 +115,17 @@ anything is overwritten.
 ./update.sh --check   # read-only: report drift without cloning or building
 ```
 
-`update.sh` reads the manifest written by `setup.sh`, compares each local
-component's revision against upstream (`git ls-remote` — no local clones needed
-in `--check`), rebuilds only the components that moved using the **same** Qt
-toolchain, and restarts the running shell service only when something changed
-*and* the service is active. Qt itself is a fixed toolchain — bump it with
-`./setup.sh --qt-version X`.
+`update.sh` reads the manifest written by `setup.sh`. Every built component is
+compiled from an **exact upstream commit recorded in `revisions.conf`** (the
+"known-good" revision the maintainer tested), so a fresh `./setup.sh` is always
+reproducible. `update.sh` compares the installed revision against the pinned one
+and rebuilds only what differs — it never silently tracks moving upstream. Qt
+itself is a fixed toolchain — bump it with `./setup.sh --qt-version X`.
+
+To deliberately track newer upstream (after testing it yourself), run
+`./update.sh --update-sources`: it fetches the latest default-branch commit of
+every component, rewrites `revisions.conf`, and rebuilds to the new pins. Commit
+the bump afterwards.
 
 > `update.sh` rebuilds *sources* only. To refresh the shipped configs/hooks
 > after a repo change (e.g. the lock-restore fix), re-run the config deploy:
@@ -128,9 +133,10 @@ toolchain, and restarts the running shell service only when something changed
 
 | Flag | Effect |
 |---|---|
-| `--check` | read-only status report (no clones, no builds) |
+| `--check` | read-only status report (installed vs pinned vs upstream) |
 | `--yes` | apply without prompting |
-| `--force` | rebuild even when local matches upstream |
+| `--force` | rebuild pinned revisions even when already installed |
+| `--update-sources` | bump `revisions.conf` to latest upstream, then rebuild |
 | `--no-restart` | keep the running shell service as-is |
 
 ## Uninstall

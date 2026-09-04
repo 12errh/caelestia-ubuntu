@@ -28,6 +28,35 @@ ASSUME_YES=0
 SKIP_APT=0; SKIP_QT=0; SKIP_FONTS=0; SKIP_CONFIG=0; IGNORE_SPACE=0
 QT_REQUESTED=0
 
+# Known-good upstream revisions (see revisions.conf). Empty = track the repo's
+# default branch (legacy behaviour). setup.sh checks these exact commits out so
+# a fresh install is reproducible; bump them deliberately with:
+#     ./update.sh --update-sources
+PIN_FILE="$REPO_DIR/revisions.conf"
+PIN_QS=""; PIN_CAEL=""; PIN_M3S=""; PIN_CAVA=""; PIN_CLI=""
+load_pins() {
+    [ -f "$PIN_FILE" ] || return 0
+    while IFS='=' read -r k v; do
+        case "$k" in
+            ''|\#*) continue ;;
+            quickshell)    PIN_QS="$v" ;;
+            caelestia)     PIN_CAEL="$v" ;;
+            m3shapes)      PIN_M3S="$v" ;;
+            cava)          PIN_CAVA="$v" ;;
+            caelestia_cli) PIN_CLI="$v" ;;
+        esac
+    done < "$PIN_FILE"
+}
+# Ensure <sha> exists locally (fetch it / unshallow if not), so a checkout can
+# never fail on a shallow or stale clone.
+ensure_commit() {  # $1=dir $2=sha
+    git -C "$1" cat-file -e "$2^{commit}" >/dev/null 2>&1 && return 0
+    git -C "$1" fetch --quiet origin "$2" 2>/dev/null && return 0
+    git -C "$1" fetch --quiet --unshallow origin 2>/dev/null && return 0
+    git -C "$1" fetch --quiet origin 2>/dev/null || true
+    git -C "$1" cat-file -e "$2^{commit}" >/dev/null 2>&1
+}
+
 # ----------------------------------------------------------------------------
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*"; }
@@ -210,14 +239,18 @@ stage_wayland() {
 stage_cava() {
     log "stage: libcava (visualiser backend)"
     export PKG_CONFIG_PATH="/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-    if pkg-config --exists libcava 2>/dev/null; then
+    if pkg-config --exists libcava 2>/dev/null && [ -z "$PIN_CAVA" ]; then
         ok "libcava already present ($(pkg-config --modversion libcava))"
         return 0
     fi
     if [ ! -d "$SRC_ROOT/cava" ]; then
-        git clone --depth 1 https://github.com/LukashonakV/cava "$SRC_ROOT/cava"
+        git clone https://github.com/LukashonakV/cava "$SRC_ROOT/cava"
     else
-        git -C "$SRC_ROOT/cava" pull --ff-only || true
+        git -C "$SRC_ROOT/cava" fetch --quiet origin 2>/dev/null || true
+    fi
+    if [ -n "$PIN_CAVA" ]; then
+        ensure_commit "$SRC_ROOT/cava" "$PIN_CAVA" || die "cava: pinned revision $PIN_CAVA not fetchable"
+        git -C "$SRC_ROOT/cava" reset --hard --quiet "$PIN_CAVA"
     fi
     ( cd "$SRC_ROOT/cava" \
       && ./autogen.sh \
@@ -245,7 +278,7 @@ build_cmake() {  # $1=srcdir $2=prefix $3=extra-args... ; runs configure+build+i
 }
 
 stage_quickshell() {
-    log "stage: quickshell (git master)"
+    log "stage: quickshell (pinned revision or master)"
     # Primary clone host is the upstream self-hosted forgejo; fall back to the
     # GitHub mirror so a common user is never blocked by one host being down.
     if [ ! -d "$SRC_ROOT/quickshell" ]; then
@@ -254,11 +287,17 @@ stage_quickshell() {
                  git clone https://github.com/outfoxxed/quickshell "$SRC_ROOT/quickshell" \
                     || die "quickshell clone failed (both upstream and mirror)"; }
     else
-        git -C "$SRC_ROOT/quickshell" pull --ff-only 2>/dev/null \
-            || git -C "$SRC_ROOT/quickshell" fetch origin 2>/dev/null \
+        git -C "$SRC_ROOT/quickshell" fetch --quiet origin 2>/dev/null \
             || { warn "quickshell upstream unreachable — switching remote to GitHub mirror"; \
                  git -C "$SRC_ROOT/quickshell" remote set-url origin https://github.com/outfoxxed/quickshell; \
-                 git -C "$SRC_ROOT/quickshell" pull --ff-only 2>/dev/null || true; }
+                 git -C "$SRC_ROOT/quickshell" fetch --quiet origin 2>/dev/null || true; }
+    fi
+    # Build the pinned known-good revision (revisions.conf) so a fresh install
+    # is reproducible instead of tracking whatever master is today.
+    if [ -n "$PIN_QS" ]; then
+        ensure_commit "$SRC_ROOT/quickshell" "$PIN_QS" || die "quickshell: pinned revision $PIN_QS not fetchable"
+        git -C "$SRC_ROOT/quickshell" checkout --quiet "$PIN_QS" || die "quickshell: cannot check out pinned revision $PIN_QS"
+        ok "quickshell at pinned revision $(git -C "$SRC_ROOT/quickshell" rev-parse --short=12 HEAD)"
     fi
     # -DCMAKE_INSTALL_LIBDIR=lib keeps quickshell's own libs under /usr/local/lib
     # so qs's $ORIGIN/../lib RPATH resolves them (multiarch libdir isn't on RPATH).
@@ -288,9 +327,13 @@ stage_quickshell() {
 stage_m3shapes() {
     log "stage: m3shapes (Material 3 shape QML module)"
     if [ ! -d "$SRC_ROOT/m3shapes" ]; then
-        git clone --depth 1 https://github.com/soramanew/m3shapes "$SRC_ROOT/m3shapes"
+        git clone https://github.com/soramanew/m3shapes "$SRC_ROOT/m3shapes"
     else
-        git -C "$SRC_ROOT/m3shapes" pull --ff-only || true
+        git -C "$SRC_ROOT/m3shapes" fetch --quiet origin 2>/dev/null || true
+    fi
+    if [ -n "$PIN_M3S" ]; then
+        ensure_commit "$SRC_ROOT/m3shapes" "$PIN_M3S" || die "m3shapes: pinned revision $PIN_M3S not fetchable"
+        git -C "$SRC_ROOT/m3shapes" reset --hard --quiet "$PIN_M3S"
     fi
     build_cmake "$SRC_ROOT/m3shapes" "/" -DCMAKE_INSTALL_LIBDIR=lib
     sudo cmake --install "$SRC_ROOT/m3shapes/build" >/dev/null
@@ -314,13 +357,22 @@ stage_shell() {
             warn "local changes found in $dir — tracked changes saved to branch backup-local-changes, untracked files copied to $ub"
         fi
         git -C "$dir" fetch origin
-        git -C "$dir" reset --hard origin/main
-        git -C "$dir" clean -fd
     elif [ -d "$dir" ]; then
         sudo rm -rf "$dir"
         git clone https://github.com/caelestia-dots/shell.git "$dir"
     else
         git clone https://github.com/caelestia-dots/shell.git "$dir"
+    fi
+    # Build the pinned known-good revision (revisions.conf). Empty PIN_CAEL
+    # keeps the upstream default branch (legacy behaviour).
+    if [ -n "$PIN_CAEL" ]; then
+        ensure_commit "$dir" "$PIN_CAEL" || die "caelestia: pinned revision $PIN_CAEL not fetchable"
+        git -C "$dir" reset --hard "$PIN_CAEL" >/dev/null || die "caelestia: cannot reset to pinned revision $PIN_CAEL"
+        git -C "$dir" clean -fd >/dev/null 2>&1 || true
+        ok "caelestia shell at pinned revision $(git -C "$dir" rev-parse --short=12 HEAD)"
+    else
+        git -C "$dir" reset --hard origin/main >/dev/null 2>&1 || true
+        git -C "$dir" clean -fd >/dev/null 2>&1 || true
     fi
     build_cmake "$dir" "/" -DCMAKE_INSTALL_LIBDIR=lib
     sudo cmake --install "$dir/build" >/dev/null
@@ -332,12 +384,13 @@ stage_shell() {
 
 stage_cli() {
     log "stage: caelestia CLI (best effort)"
+    local spec="git+https://github.com/caelestia-dots/cli${PIN_CLI:+@$PIN_CLI}"
     if have uv; then
-        uv tool install --force git+https://github.com/caelestia-dots/cli \
-            && ok "caelestia CLI via uv (from upstream git)" && return 0
+        uv tool install --force "$spec" \
+            && ok "caelestia CLI via uv (pinned ${PIN_CLI:0:12})" && return 0
     elif have pipx; then
-        pipx install --force "caelestia-cli @ git+https://github.com/caelestia-dots/cli" \
-            && ok "caelestia CLI via pipx" && return 0
+        pipx install --force "caelestia-cli @ $spec" \
+            && ok "caelestia CLI via pipx (pinned ${PIN_CLI:0:12})" && return 0
     fi
     warn "caelestia CLI not installed (uv/pipx missing) — shell still works; CLI adds 'caelestia shell -d' autostart, theme CLI and wallpaper commands"
 }
@@ -522,6 +575,7 @@ stage_manifest() {
 
 # ----------------------------------------------------------------------------
 main() {
+    load_pins
     preflight
     stage_apt
     stage_qt
