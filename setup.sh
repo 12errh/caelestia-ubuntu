@@ -251,7 +251,11 @@ stage_quickshell() {
     else
         git -C "$SRC_ROOT/quickshell" pull --ff-only || git -C "$SRC_ROOT/quickshell" fetch origin
     fi
-    build_cmake "$SRC_ROOT/quickshell" "/usr/local" -DVENDOR_CPPTRACE=ON
+    # -DCMAKE_INSTALL_LIBDIR=lib: keep the QML module at /usr/local/lib/qt6/qml
+    # (a Qt-default search path). Without it Ubuntu's GNUInstallDirs picks the
+    # multiarch libdir /usr/local/lib/x86_64-linux-gnu/qt6/qml, which Qt does not
+    # search by default -> the shell can't resolve Quickshell.* types at runtime.
+    build_cmake "$SRC_ROOT/quickshell" "/usr/local" -DVENDOR_CPPTRACE=ON -DCMAKE_INSTALL_LIBDIR=lib
     sudo cmake --install "$SRC_ROOT/quickshell/build" >/dev/null
     # Bake the Qt lib path in (force-rpath = DT_RPATH so transitive Qt libs resolve);
     # keeps `qs` IPC calls working with NO session-wide LD_LIBRARY_PATH.
