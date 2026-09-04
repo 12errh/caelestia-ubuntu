@@ -251,25 +251,21 @@ stage_quickshell() {
     else
         git -C "$SRC_ROOT/quickshell" pull --ff-only || git -C "$SRC_ROOT/quickshell" fetch origin
     fi
-    # -DCMAKE_INSTALL_LIBDIR=lib keeps quickshell's own libraries under
-    # /usr/local/lib so qs's $ORIGIN/../lib RPATH resolves them (rather than the
-    # multiarch libdir, which isn't on the RPATH nor a default ld.so path).
-    build_cmake "$SRC_ROOT/quickshell" "/usr/local" -DVENDOR_CPPTRACE=ON -DCMAKE_INSTALL_LIBDIR=lib
+    # -DCMAKE_INSTALL_LIBDIR=lib keeps quickshell's own libs under /usr/local/lib
+    # so qs's $ORIGIN/../lib RPATH resolves them (multiarch libdir isn't on RPATH).
+    # -DINSTALL_QMLDIR=/usr/local/lib/qt6/qml: quickshell gates QML-module
+    # installation behind INSTALL_QMLDIR (see cmake/install-qml-module.cmake) and
+    # installs NOTHING if it's unset. Qt's install_qml_module also ignores the
+    # project libdir, so GNUInstallDirs would otherwise route the Quickshell qml
+    # module to the multiarch /usr/local/lib/x86_64-linux-gnu/qt6/qml — which Qt's
+    # default QML2 search paths do NOT scan. Pointing INSTALL_QMLDIR at Qt's
+    # canonical qml path fixes both CI (ci-verify checks /usr/local/lib/qt6/qml/Quickshell)
+    # and fresh-Ubuntu runtime (Quickshell.* types resolve without help).
+    build_cmake "$SRC_ROOT/quickshell" "/usr/local" \
+        -DVENDOR_CPPTRACE=ON \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DINSTALL_QMLDIR=/usr/local/lib/qt6/qml
     sudo cmake --install "$SRC_ROOT/quickshell/build" >/dev/null
-    # Qt's install_qml_module ignores the project libdir, so on Ubuntu the
-    # Quickshell QML module (with its service plugins) still drops into the
-    # multiarch dir /usr/local/lib/x86_64-linux-gnu/qt6/qml, which Qt's default
-    # QML2 import paths do NOT search -> the shell couldn't resolve
-    # Quickshell.* types at runtime. Mirror it to the canonical Qt qml path.
-    local _qml_src="" _p
-    for _p in /usr/local/lib/qt6/qml/Quickshell /usr/local/lib/x86_64-linux-gnu/qt6/qml/Quickshell; do
-        [ -d "$_p" ] && _qml_src="$_p" && break
-    done
-    if [ -n "$_qml_src" ] && [ "$_qml_src" != "/usr/local/lib/qt6/qml/Quickshell" ]; then
-        sudo mkdir -p /usr/local/lib/qt6/qml
-        sudo cp -a "$_qml_src" /usr/local/lib/qt6/qml/Quickshell
-        sudo ldconfig
-    fi
     # Bake the Qt lib path in (force-rpath = DT_RPATH so transitive Qt libs resolve);
     # keeps `qs` IPC calls working with NO session-wide LD_LIBRARY_PATH.
     sudo patchelf --force-rpath \
