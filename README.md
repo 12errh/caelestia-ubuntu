@@ -19,6 +19,52 @@ sudo apt install -y shellcheck   # optional, for the lint step
 
 Reboot, pick **Hyprland** in the GDM gear menu, and log in.
 
+## Prefer a graphical installer?
+
+You don't have to use the terminal at all — the repository ships a
+complete **desktop app** (GTK4/libadwaita, no extra Python packages) that
+wraps every script:
+
+- **Install wizard** — system checks, install options, sudo password
+  (kept in memory only), live progress log and result. Re-running is a
+  safe repair.
+- **Setup screen** — pick your **wallpaper** from thumbnails, tweak
+  starter settings (transparency, rounding, animation speed, font scale,
+  idle/lock timers), restart the shell, uninstall.
+- **Updates screen** — read-only revision report (installed vs pinned vs
+  upstream) and one-click apply with a live log. Its **Advanced** area
+  jumps to the newest upstream commits, then lets you *Keep* the tested
+  revisions as your known-good pins, *Revert*, or *Repair* the Quickshell
+  runtime — it never overwrites your configs or settings.
+- **Built-in guides** — first login, every keybind, wallpaper & dynamic
+  colours, idle/lock behaviour, updating and troubleshooting.
+
+![Caelestia for Ubuntu — welcome screen](assets/welcom.png)
+
+```bash
+./app/run.py                     # run straight from a clone
+sudo ./app/install.sh            # or install into the app grid
+./app/run.py --check             # headless system report (no GUI)
+```
+
+### Install as a package (.deb)
+
+Prefer the app in your launcher without a clone? Build the package (the
+app is pure Python + PyGObject, so the only runtime deps are the standard
+GTK4 bindings already present on Ubuntu 24.04 / Zorin / Mint / Pop):
+
+```bash
+./packaging/build-deb.sh                     # -> dist/caelestia-installer_<ver>_all.deb
+sudo apt install ./dist/caelestia-installer_*_all.deb
+```
+
+The package installs the **app only** (the Caelestia desktop itself is
+still built from within the app). See
+[docs/INSTALL_APP.md](docs/INSTALL_APP.md) for details.
+
+See [app/README.md](app/README.md) and the
+[complete user guide](docs/USER_GUIDE.md) (also built into the app).
+
 ---
 
 ## Screenshots
