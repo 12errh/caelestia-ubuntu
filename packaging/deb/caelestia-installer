@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  caelestia-installer — packaged launcher (used by the .deb/RPM install).
+#
+#  The app drives setup.sh/update.sh and the "keep tested pins" workflow, which
+#  writes revisions.conf. The packaged repo under /usr/share is root-owned, so
+#  we keep a user-writable copy and point the app at it. Scripts and configs are
+#  refreshed from the package on each launch; the user's revisions.conf (tested
+#  pins) is preserved.
+# ============================================================================
+set -euo pipefail
+
+PKG_REPO="${CAEL_PKG_REPO:-/usr/share/caelestia-installer/repo}"
+APP="${CAEL_PKG_APP:-/usr/share/caelestia-installer/app/run.py}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+USER_REPO="$DATA_HOME/caelestia-installer/repo"
+
+mkdir -p "$(dirname "$USER_REPO")"
+if [ ! -d "$USER_REPO" ]; then
+    cp -a "$PKG_REPO" "$USER_REPO"
+else
+    for f in setup.sh update.sh uninstall.sh; do
+        [ -f "$PKG_REPO/$f" ] && cp -f "$PKG_REPO/$f" "$USER_REPO/$f"
+    done
+    if [ -d "$PKG_REPO/configs" ]; then
+        rm -rf "$USER_REPO/configs"
+        cp -a "$PKG_REPO/configs" "$USER_REPO/configs"
+    fi
+    # Never clobber the user's tested pins.
+    [ -f "$USER_REPO/revisions.conf" ] || cp -f "$PKG_REPO/revisions.conf" "$USER_REPO/revisions.conf"
+fi
+
+export CAEL_REPO_DIR="$USER_REPO"
+exec python3 "$APP" "$@"

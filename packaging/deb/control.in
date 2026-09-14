@@ -1,0 +1,17 @@
+Package: caelestia-installer
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, sudo
+Recommends: xdg-utils
+Installed-Size: @SIZE@
+Maintainer: 12errh <12errh@users.noreply.github.com>
+Homepage: https://github.com/12errh/caelestia-ubuntu
+Description: Caelestia for Ubuntu graphical installer
+ Runs the caelestia-ubuntu setup/update/uninstall scripts with a GUI:
+ system checks, install options, live progress, a wallpaper and settings
+ panel, a revision updater with keep/revert/repair, and the built-in guide.
+ .
+ This package installs the installer app only. The Caelestia desktop
+ (Hyprland + Quickshell) is built by the app from pinned upstream commits.
