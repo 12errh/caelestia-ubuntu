@@ -10,6 +10,8 @@ installs every dependency, and deploys the maintainer's exact desktop — theme,
 panels, animations, wallpapers, fonts, idle/lock behaviour — as a **side-by-side
 session**. GNOME stays completely untouched.
 
+## Install from source
+
 ```bash
 git clone https://github.com/12errh/caelestia-ubuntu.git
 cd caelestia-ubuntu
@@ -49,18 +51,18 @@ sudo ./app/install.sh            # or install into the app grid
 
 ### Install as a package (.deb)
 
-Prefer the app in your launcher without a clone? Build the package (the
-app is pure Python + PyGObject, so the only runtime deps are the standard
-GTK4 bindings already present on Ubuntu 24.04 / Zorin / Mint / Pop):
+The easiest way to install the app on Ubuntu / Zorin / Mint / Pop is to
+download the `.deb` from the
+[latest GitHub Release](https://github.com/12errh/caelestia-ubuntu/releases/latest):
 
 ```bash
-./packaging/build-deb.sh                     # -> dist/caelestia-installer_<ver>_all.deb
-sudo apt install ./dist/caelestia-installer_*_all.deb
+sudo apt install ./caelestia-installer_*_all.deb
 ```
 
 The package installs the **app only** (the Caelestia desktop itself is
 still built from within the app). See
-[docs/INSTALL_APP.md](docs/INSTALL_APP.md) for details.
+[docs/INSTALL_APP.md](docs/INSTALL_APP.md) for details and manual build
+options (maintainers).
 
 See [app/README.md](app/README.md) and the
 [complete user guide](docs/USER_GUIDE.md) (also built into the app).

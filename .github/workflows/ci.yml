@@ -34,7 +34,11 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update -y && sudo apt-get install -y shellcheck
       - name: Lint scripts
-        run: shellcheck -S error setup.sh uninstall.sh update.sh scripts/ci-verify-install.sh
+        run: |
+          shellcheck -S error setup.sh uninstall.sh update.sh \
+            scripts/ci-verify-install.sh app/install.sh \
+            packaging/build-deb.sh packaging/deb/caelestia-installer \
+            packaging/deb/postinst packaging/deb/postrm
 
   # --------------------------------------------------------------------------
   # Heavy, real-system test. The runner's `/` is too small for the full build,

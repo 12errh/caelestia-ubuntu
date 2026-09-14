@@ -11,21 +11,25 @@ keybind/guide reference.
 
 ## Run it
 
-From a clone of the repository (no install step):
+### Easiest: install from a release (.deb)
+
+Download the `.deb` from the
+[latest GitHub Release](https://github.com/12errh/caelestia-ubuntu/releases/latest)
+and install it:
+
+```bash
+sudo apt install ./caelestia-installer_*_all.deb
+# then launch "Caelestia for Ubuntu" from the applications menu
+```
+
+### From a clone (no install step)
 
 ```bash
 ./app/run.py              # GUI
 ./app/run.py --check      # headless system report (no GTK needed)
 ```
 
-Build and install a **.deb** (recommended for end users; no clone needed at
-run time):
-
-```bash
-./packaging/build-deb.sh
-sudo apt install ./dist/caelestia-installer_*_all.deb
-# then launch "Caelestia for Ubuntu" from the applications menu
-```
+### Install script (from a clone)
 
 Or install it into the app grid with the script (system-wide, or `--user`
 for current user only):

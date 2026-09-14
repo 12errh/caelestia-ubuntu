@@ -1,0 +1,80 @@
+name: Package (.deb)
+
+# Build the caelestia-installer .deb. On version tags (v*) the package is
+# attached to the GitHub Release, so users can install it directly:
+#
+#   sudo apt install ./caelestia-installer_*_all.deb
+#
+# On branch pushes/PRs the package is only uploaded as a workflow artifact,
+# so breakage is caught early without creating releases.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # attaching assets to the release on tag builds
+
+concurrency:
+  group: deb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deb:
+    name: Build .deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update -y && sudo apt-get install -y dpkg-dev
+
+      - name: Resolve package version
+        id: ver
+        # Tag v1.2.3 -> package version 1.2.3; otherwise fall back to the
+        # version baked into the app package.
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build .deb
+        env:
+          CAELESTIA_INSTALLER_VERSION: ${{ steps.ver.outputs.version }}
+        run: bash packaging/build-deb.sh
+
+      - name: Show package info
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb -c dist/*.deb | awk '{print $6}' | sed -n '1,12p'
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.deb > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caelestia-installer-deb
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Attach .deb to the GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/SHA256SUMS
+          generate_release_notes: true

@@ -17,7 +17,10 @@ repo="$(cd "$here/.." && pwd)"
 
 command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb not found (install dpkg-dev)" >&2; exit 1; }
 
-VERSION="$(python3 -c "import sys; sys.path.insert(0, '$repo/app'); from caelestia_installer import VERSION; print(VERSION)")"
+VERSION="${CAELESTIA_INSTALLER_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION="$(python3 -c "import sys; sys.path.insert(0, '$repo/app'); from caelestia_installer import VERSION; print(VERSION)")"
+fi
 PKG="caelestia-installer"
 OUT="$repo/dist"
 STAGE="$OUT/${PKG}_${VERSION}_all"

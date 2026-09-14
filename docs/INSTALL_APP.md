@@ -1,12 +1,9 @@
 # Installing the Caelestia for Ubuntu app
 
-The repository ships two ways to run the graphical app. Neither uses any
-third-party Python packages — the app is pure Python + PyGObject
-(GTK4/libadwaita).
-
-> The app installs and manages the **Caelestia desktop** (Hyprland +
-> Quickshell). This document is only about installing *the app itself*; the
-> desktop is built from within the app (Install tab → `setup.sh`).
+The repository ships a graphical installer/setup/updates app
+(GTK4/libadwaita, pure Python + PyGObject). This document is only about
+installing *the app itself*; the Caelestia desktop is built from within the
+app (Install tab → `setup.sh`).
 
 ## Requirements
 
@@ -22,16 +19,17 @@ Ubuntu 24.04, Zorin OS 18, Linux Mint 22 and Pop!_OS 22.04 GNOME desktops:
 | `sudo` | drives the install scripts |
 | `xdg-utils` (recommended) | "Open shell.json in editor" |
 
-`./packaging/build-deb.sh` declares these as `Depends`, so `apt` installs
-them automatically.
+The `.deb` declares these as `Depends`, so `apt` installs them
+automatically.
 
-## Option A — .deb package (recommended)
+## Install from a release (.deb)
+
+Grab the latest `.deb` from the
+[GitHub Releases](https://github.com/12errh/caelestia-ubuntu/releases)
+and install it:
 
 ```bash
-git clone https://github.com/12errh/caelestia-ubuntu.git
-cd caelestia-ubuntu
-./packaging/build-deb.sh
-sudo apt install ./dist/caelestia-installer_*_all.deb
+sudo apt install ./caelestia-installer_*_all.deb
 ```
 
 Then launch **Caelestia for Ubuntu** from the applications menu, or run:
@@ -72,7 +70,16 @@ sudo apt remove caelestia-installer
 rm -rf ~/.local/share/caelestia-installer
 ```
 
-## Option B — install script (from a clone)
+## Other ways to run the app
+
+### From a clone (no install)
+
+```bash
+./app/run.py            # GUI
+./app/run.py --check    # headless system report, no GUI needed
+```
+
+### Install script (from a clone)
 
 ```bash
 sudo ./app/install.sh        # system-wide (/usr/local), appears in the app grid
@@ -82,12 +89,20 @@ sudo ./app/install.sh        # system-wide (/usr/local), appears in the app grid
 This copies the app and repo to `/usr/local/share/caelestia-installer`
 (or `~/.local/share/...`) and installs a `caelestia-installer` launcher.
 
-## Option C — run straight from a clone (no install)
+## Building the package (maintainers)
+
+If you want to build the `.deb` yourself instead of downloading from
+Releases:
 
 ```bash
-./app/run.py            # GUI
-./app/run.py --check    # headless system report, no GUI needed
+git clone https://github.com/12errh/caelestia-ubuntu.git
+cd caelestia-ubuntu
+./packaging/build-deb.sh                     # -> dist/caelestia-installer_<ver>_all.deb
+sudo apt install ./dist/caelestia-installer_*_all.deb
 ```
+
+The CI workflow (`.github/workflows/deb.yml`) automates this and attaches
+the package to every tagged release.
 
 ## Other formats
 
