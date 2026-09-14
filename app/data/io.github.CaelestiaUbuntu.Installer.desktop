@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Caelestia for Ubuntu
+GenericName=Desktop Installer
+Comment=Install, set up and learn the Caelestia desktop on Ubuntu-family systems
+Exec=caelestia-installer
+Icon=io.github.CaelestiaUbuntu.Installer
+Terminal=false
+Categories=System;Utility;
+Keywords=caelestia;hyprland;quickshell;install;desktop;
+StartupNotify=true
