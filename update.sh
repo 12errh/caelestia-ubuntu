@@ -200,7 +200,7 @@ align_to_pin() {  # $1=dir $2=component $3=full-pin
     git -C "$dir" rev-parse --short=12 HEAD 2>/dev/null || echo ""
 }
 
-record() { NEW_MANIFEST+="$(printf '%s=%s\n' "$1" "$2")"; }
+record() { NEW_MANIFEST+="$1=$2"$'\n'; }
 
 # rebuild <key> <dir> <url> <prefix> <extra cmake args...>
 rebuild() {
@@ -346,11 +346,17 @@ main() {
         warn "local config changes backed up (tracked->branch backup-local-changes, untracked->$ub)"
     fi
 
-    # quickshell (system Qt-based binary)
-    rebuild "quickshell" "$SRC_ROOT/quickshell" "$QS_REPO" "/usr/local" "-DVENDOR_CPPTRACE=ON"
+    # quickshell (system Qt-based binary). Bake the Qt path in at configure time
+    # so `cmake --install` already produces a correct RPATH; patch the real ELF as
+    # a fallback (qs is a symlink to /usr/local/bin/quickshell).
+    rebuild "quickshell" "$SRC_ROOT/quickshell" "$QS_REPO" "/usr/local" \
+        "-DVENDOR_CPPTRACE=ON" \
+        "-DCMAKE_INSTALL_RPATH=$QT_PREFIX/lib;\$ORIGIN;\$ORIGIN/../lib"
     sudo patchelf --force-rpath --set-rpath "$QT_PREFIX/lib:\$ORIGIN:\$ORIGIN/../lib" \
-        /usr/local/bin/qs /usr/local/bin/quickshell 2>/dev/null || warn "quickshell rpath patch skipped (non-fatal)"
-    env -u LD_LIBRARY_PATH /usr/local/bin/qs --version >/dev/null 2>&1 || warn "quickshell does not run after update"
+        /usr/local/bin/quickshell 2>/dev/null || warn "quickshell rpath patch skipped (non-fatal)"
+    if ! env -u LD_LIBRARY_PATH /usr/local/bin/qs --version >/dev/null 2>&1; then
+        warn "quickshell does not run after update — use Updates → Advanced → Repair quickshell runtime"
+    fi
 
     # caelestia shell (QML module + shell config repo)
     rebuild "caelestia" "$SHELL_DIR" "$CAEL_REPO" "/" "-DCMAKE_INSTALL_LIBDIR=lib"

@@ -312,13 +312,15 @@ stage_quickshell() {
     build_cmake "$SRC_ROOT/quickshell" "/usr/local" \
         -DVENDOR_CPPTRACE=ON \
         -DCMAKE_INSTALL_LIBDIR=lib \
-        -DINSTALL_QMLDIR=/usr/local/lib/qt6/qml
+        -DINSTALL_QMLDIR=/usr/local/lib/qt6/qml \
+        "-DCMAKE_INSTALL_RPATH=$QT_ROOT/$QT_VERSION/gcc_64/lib;\$ORIGIN;\$ORIGIN/../lib"
     sudo cmake --install "$SRC_ROOT/quickshell/build" >/dev/null
     # Bake the Qt lib path in (force-rpath = DT_RPATH so transitive Qt libs resolve);
-    # keeps `qs` IPC calls working with NO session-wide LD_LIBRARY_PATH.
+    # keeps `qs` IPC calls working with NO session-wide LD_LIBRARY_PATH. Patching the
+    # real ELF (qs is a symlink to it) makes this idempotent and reliable.
     sudo patchelf --force-rpath \
         --set-rpath "$QT_ROOT/$QT_VERSION/gcc_64/lib:\$ORIGIN:\$ORIGIN/../lib" \
-        /usr/local/bin/qs /usr/local/bin/quickshell
+        /usr/local/bin/quickshell 2>/dev/null || true
     env -u LD_LIBRARY_PATH /usr/local/bin/qs --version >/dev/null \
         || die "quickshell installed but does not run"
     ok "quickshell $(env -u LD_LIBRARY_PATH /usr/local/bin/qs --version 2>/dev/null | head -1)"
