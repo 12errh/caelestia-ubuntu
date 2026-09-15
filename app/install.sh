@@ -46,7 +46,7 @@ cp -a "$REPO/setup.sh" "$REPO/update.sh" "$REPO/uninstall.sh" \
 cp -a "$REPO/configs" "$SHARE/repo/"
 
 # 2. launcher + icon ----------------------------------------------------------
-mkdir -p "$BINDIR" "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/scalable/apps"
+mkdir -p "$BINDIR" "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/128x128/apps"
 cat > "$BINDIR/caelestia-installer" <<EOF
 #!/usr/bin/env bash
 export CAEL_REPO_DIR="$SHARE/repo"
@@ -54,7 +54,7 @@ exec python3 "$SHARE/app/run.py" "\$@"
 EOF
 chmod +x "$BINDIR/caelestia-installer"
 cp "$SRC/data/$APP_ID.desktop" "$PREFIX/share/applications/"
-cp "$SRC/data/$APP_ID.svg" "$PREFIX/share/icons/hicolor/scalable/apps/"
+cp "$SRC/data/$APP_ID.png" "$PREFIX/share/icons/hicolor/128x128/apps/"
 
 # 3. runtime deps for the GUI itself -------------------------------------------
 if [ "$MODE" = "system" ] && command -v apt-get >/dev/null 2>&1; then

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Caelestia for Ubuntu" width="480">
+</p>
+
 # caelestia-ubuntu
 
 **Caelestia Shell (Quickshell) + Hyprland, on Ubuntu 24.04 / Zorin OS 18 / Mint 22 / Pop!_OS 22.04 — one script, zero manual config.**

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/logo.png" alt="Caelestia for Ubuntu" width="400">
+</p>
+
 # Caelestia for Ubuntu — the app
 
 A graphical installer, setup assistant and built-in user guide for the

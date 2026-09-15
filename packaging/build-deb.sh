@@ -31,7 +31,7 @@ mkdir -p "$STAGE/DEBIAN" \
          "$STAGE/usr/share/caelestia-installer/app" \
          "$STAGE/usr/share/caelestia-installer/repo" \
          "$STAGE/usr/share/applications" \
-         "$STAGE/usr/share/icons/hicolor/scalable/apps"
+         "$STAGE/usr/share/icons/hicolor/128x128/apps"
 
 # --- payload ---------------------------------------------------------------
 install -m 0755 "$here/deb/caelestia-installer" "$STAGE/usr/bin/caelestia-installer"
@@ -45,8 +45,8 @@ cp -a "$repo/configs" "$STAGE/usr/share/caelestia-installer/repo/"
 
 install -m 0644 "$repo/app/data/io.github.CaelestiaUbuntu.Installer.desktop" \
     "$STAGE/usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop"
-install -m 0644 "$repo/app/data/io.github.CaelestiaUbuntu.Installer.svg" \
-    "$STAGE/usr/share/icons/hicolor/scalable/apps/io.github.CaelestiaUbuntu.Installer.svg"
+install -m 0644 "$repo/app/data/io.github.CaelestiaUbuntu.Installer.png" \
+    "$STAGE/usr/share/icons/hicolor/128x128/apps/io.github.CaelestiaUbuntu.Installer.png"
 
 find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} +
 find "$STAGE" -name '*.pyc' -delete
