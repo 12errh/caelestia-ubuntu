@@ -14,41 +14,42 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-_BASE_ICON = 28
-_MAX_ICON = 52
-_BASE_BTN = 48
-_MAX_BTN = 80
-_SPRING = 0.12
-_FRAME_MS = 16
+# ---- tunables -----------------------------------------------------------
+BASE_ICON = 36          # idle icon pixel size
+MAX_ICON = 64           # fully-hovered icon pixel size
+BASE_BTN = 56           # idle button allocation
+MAX_BTN = 92            # fully-hovered button allocation
+HOVER_RADIUS = 200      # px from button centre to edge of influence
+SPRING_FACTOR = 0.08    # lower = smoother / slower
+FRAME_MS = 16           # ~60 fps
 
 _DOCK_CSS = b"""
-@define-color dock_bg alpha(@window_bg_color, 0.65);
+@define-color dock_bg alpha(@window_bg_color, 0.72);
 
 floating-dock {
   background: @dock_bg;
-  border: 1px solid alpha(@borders, 0.45);
-  border-radius: 22px;
-  padding: 8px 14px;
-  box-shadow: 0 4px 24px alpha(black, 0.25),
-              0 1px 4px alpha(black, 0.15);
+  border: 1px solid alpha(@borders, 0.35);
+  border-radius: 24px;
+  padding: 10px 18px;
+  box-shadow: 0 8px 32px alpha(black, 0.22),
+              0 2px 8px alpha(black, 0.12);
 }
 
 floating-dock dock-btn {
   background: transparent;
   border: none;
   border-radius: 999px;
-  min-width: 48px;
-  min-height: 48px;
   padding: 0;
-  transition: background 200ms ease;
+  min-width: 56px;
+  min-height: 56px;
 }
 
 floating-dock dock-btn:hover {
-  background: alpha(@accent_color, 0.18);
+  background: alpha(@accent_color, 0.15);
 }
 
 floating-dock dock-btn.active {
-  background: alpha(@accent_color, 0.30);
+  background: alpha(@accent_color, 0.25);
 }
 """
 
@@ -69,9 +70,9 @@ def _ensure_css() -> None:
     )
 
 
-def _spring(current: float, target: float, dt: float) -> float:
-    """Exponential-decay spring interpolation."""
-    return current + (target - current) * (1.0 - pow(_SPRING, dt))
+def _spring(cur: float, tgt: float, dt: float) -> float:
+    """Smooth exponential-decay spring."""
+    return cur + (tgt - cur) * (1.0 - pow(SPRING_FACTOR, dt))
 
 
 class FloatingDock(Gtk.Box):
@@ -83,54 +84,49 @@ class FloatingDock(Gtk.Box):
 
         self._on_select = on_select
         self._buttons: list[Gtk.Button] = []
-        self._btn_size: list[float] = []
-        self._ico_size: list[float] = []
-        self._tgt_size: list[float] = []
-        self._ico_tgt: list[float] = []
+        self._btn_cur: list[float] = []     # current button size
+        self._ico_cur: list[float] = []     # current icon size
+        self._btn_tgt: list[float] = []     # target button size
+        self._ico_tgt: list[float] = []     # target icon size
         self._active: str | None = None
         self._anim_id: int | None = None
-        self._prev_time: float = 0.0
+        self._prev_t: float = 0.0
 
         self.set_orientation(Gtk.Orientation.HORIZONTAL)
-        self.set_spacing(6)
+        self.set_spacing(4)
         self.set_halign(Gtk.Align.CENTER)
         self.set_valign(Gtk.Align.END)
-        self.set_margin_bottom(16)
+        self.set_margin_bottom(18)
         self.add_css_class("floating-dock")
 
-        # Track mouse across the whole dock.
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._on_motion)
+        motion.connect("leave", self._on_leave)
         self.add_controller(motion)
 
-        # Stop animation when the mouse leaves the dock entirely.
-        motion.connect("leave", self._on_leave)
-
     # ------------------------------------------------------------------
-    # Public helpers
+    # Public
     # ------------------------------------------------------------------
 
     def add_item(self, page_id: str, icon_name: str, label: str) -> None:
-        """Append one dock button."""
         btn = Gtk.Button.new()
         btn.set_tooltip_text(label)
         btn.add_css_class("dock-btn")
         btn._page_id = page_id  # type: ignore[attr-defined]
 
         img = Gtk.Image.new_from_icon_name(icon_name)
-        img.set_pixel_size(_BASE_ICON)
+        img.set_pixel_size(BASE_ICON)
         btn.set_child(img)
         btn.connect("clicked", self._on_clicked)
 
         self.append(btn)
         self._buttons.append(btn)
-        self._btn_size.append(float(_BASE_BTN))
-        self._ico_size.append(float(_BASE_ICON))
-        self._tgt_size.append(float(_BASE_BTN))
-        self._ico_tgt.append(float(_BASE_ICON))
+        self._btn_cur.append(float(BASE_BTN))
+        self._ico_cur.append(float(BASE_ICON))
+        self._btn_tgt.append(float(BASE_BTN))
+        self._ico_tgt.append(float(BASE_ICON))
 
     def set_active(self, page_id: str) -> None:
-        """Visually highlight the active dock button."""
         if self._active == page_id:
             return
         for btn in self._buttons:
@@ -142,68 +138,74 @@ class FloatingDock(Gtk.Box):
                 btn.add_css_class("active")
 
     # ------------------------------------------------------------------
-    # Hover → magnification
+    # Hover → distance-based targets
     # ------------------------------------------------------------------
 
-    def _on_motion(self, _ctrl: Gtk.EventControllerMotion,
-                   x: float, _y: float) -> None:
+    def _on_motion(self, _c: Gtk.EventControllerMotion, x: float,
+                   _y: float) -> None:
         for i, btn in enumerate(self._buttons):
-            alloc = btn.get_allocation()
-            cx = alloc.x + alloc.width / 2.0
+            a = btn.get_allocation()
+            cx = a.x + a.width * 0.5
             dist = abs(x - cx)
-            if dist < 160:
-                t = 1.0 - (dist / 160.0)
-                t = t * t  # quadratic ease-in
-                self._tgt_size[i] = _BASE_BTN + (_MAX_BTN - _BASE_BTN) * t
-                self._ico_tgt[i] = _BASE_ICON + (_MAX_ICON - _BASE_ICON) * t
+            if dist < HOVER_RADIUS:
+                t = 1.0 - dist / HOVER_RADIUS
+                t = t * t * (3.0 - 2.0 * t)   # smooth-step
+                self._btn_tgt[i] = BASE_BTN + (MAX_BTN - BASE_BTN) * t
+                self._ico_tgt[i] = BASE_ICON + (MAX_ICON - BASE_ICON) * t
             else:
-                self._tgt_size[i] = float(_BASE_BTN)
-                self._ico_tgt[i] = float(_BASE_ICON)
+                self._btn_tgt[i] = float(BASE_BTN)
+                self._ico_tgt[i] = float(BASE_ICON)
 
         if self._anim_id is None:
-            self._prev_time = time.monotonic()
-            self._anim_id = GLib.timeout_add(_FRAME_MS, self._tick)
+            self._prev_t = time.monotonic()
+            self._anim_id = GLib.timeout_add(FRAME_MS, self._tick)
 
-    def _on_leave(self, _ctrl: Gtk.EventControllerMotion) -> None:
+    def _on_leave(self, _c: Gtk.EventControllerMotion) -> None:
         for i in range(len(self._buttons)):
-            self._tgt_size[i] = float(_BASE_BTN)
-            self._ico_tgt[i] = float(_BASE_ICON)
+            self._btn_tgt[i] = float(BASE_BTN)
+            self._ico_tgt[i] = float(BASE_ICON)
+
+    # ------------------------------------------------------------------
+    # Animation loop
+    # ------------------------------------------------------------------
 
     def _tick(self) -> bool:
         now = time.monotonic()
-        dt = min(now - self._prev_time, 0.05)
-        self._prev_time = now
+        dt = min(now - self._prev_t, 0.05)
+        self._prev_t = now
 
-        settled = True
+        still_going = False
         for i, btn in enumerate(self._buttons):
-            old_sz = self._btn_size[i]
-            new_sz = _spring(old_sz, self._tgt_size[i], dt)
-            self._btn_size[i] = new_sz
+            # interpolate sizes
+            self._btn_cur[i] = _spring(self._btn_cur[i], self._btn_tgt[i], dt)
+            self._ico_cur[i] = _spring(self._ico_cur[i], self._ico_tgt[i], dt)
 
-            old_ico = self._ico_size[i]
-            new_ico = _spring(old_ico, self._ico_tgt[i], dt)
-            self._ico_size[i] = new_ico
-
-            if abs(new_sz - self._tgt_size[i]) > 0.3:
-                settled = False
-
+            sz = self._btn_cur[i]
+            ico = self._ico_cur[i]
             child = btn.get_child()
+
+            # resize icon
             if isinstance(child, Gtk.Image):
-                child.set_pixel_size(max(int(new_ico), 1))
+                child.set_pixel_size(max(int(ico), 1))
 
-            pad = max(int((new_sz - new_ico) / 2), 0)
-            child.set_margin_top(pad)
-            child.set_margin_bottom(pad)
-            child.set_margin_start(pad)
-            child.set_margin_end(pad)
+            # centre icon inside the (growing) button via equal margins
+            pad = max(int((sz - ico) * 0.5), 0)
+            if isinstance(child, Gtk.Widget):
+                child.set_margin_top(pad)
+                child.set_margin_bottom(pad)
+                child.set_margin_start(pad)
+                child.set_margin_end(pad)
 
-            if abs(new_sz - old_sz) > 0.1:
-                btn.set_size_request(int(new_sz), int(new_sz))
+            # grow / shrink the button itself
+            btn.set_size_request(int(sz), int(sz))
 
-        if settled:
+            if abs(sz - self._btn_tgt[i]) > 0.3:
+                still_going = True
+
+        if not still_going:
             self._anim_id = None
-            return False  # stop timer
-        return True  # keep ticking
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Navigation
