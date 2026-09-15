@@ -1,9 +1,9 @@
 """GTK4 / libadwaita main window.
 
-Layout: an :class:`Adw.NavigationSplitView` with a sidebar list
-(Welcome → Install → Setup → Updates → Guides → Advanced) and a single
-content header. Pages are plain widgets switched in an :class:`Adw.ViewStack`,
-so there is exactly one title bar at a time (the sidebar keeps its own).
+Layout: a :class:`Adw.ToolbarView` with a header bar and a
+:class:`Gtk.Overlay` that layers an :class:`Adw.ToastOverlay` (holding
+an :class:`Adw.ViewStack`) with a :class:`FloatingDock` floating at
+the bottom centre.
 
 All heavy work runs in threads; UI updates go through ``GLib.idle_add``.
 """
@@ -20,6 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import VERSION, checks, paths  # noqa: E402
+from .dock import FloatingDock  # noqa: E402
 from .pages.advanced import AdvancedPage  # noqa: E402
 from .pages.guides import GuidesPage  # noqa: E402
 from .pages.install import InstallPage  # noqa: E402
@@ -28,22 +29,22 @@ from .pages.updates import UpdatesPage  # noqa: E402
 from .pages.welcome import WelcomePage  # noqa: E402
 from .runner import sudo_ready, verify_sudo_password  # noqa: E402
 
-# row id -> (sidebar label, page title, header subtitle)
+# page id -> (page title, header subtitle)
 PAGE_META: dict[str, tuple[str, str, str]] = {
-    "welcome": ("Welcome", "Welcome", "Install, set up and learn Caelestia"),
-    "install": ("Install", "Install", "System checks, options and live progress"),
-    "setup": ("Setup", "Setup", "Wallpaper, appearance and maintenance"),
-    "updates": ("Updates", "Updates", "Check installed revisions and apply updates"),
-    "guides": ("Guides", "Guides", "First login, keybinds and troubleshooting"),
+    "welcome":  ("Welcome",  "Welcome",  "Install, set up and learn Caelestia"),
+    "install":  ("Install",  "Install",  "System checks, options and live progress"),
+    "setup":    ("Setup",    "Setup",    "Wallpaper, appearance and maintenance"),
+    "updates":  ("Updates",  "Updates",  "Check installed revisions and apply updates"),
+    "guides":   ("Guides",   "Guides",   "First login, keybinds and troubleshooting"),
     "advanced": ("Advanced", "Advanced", "Run repository scripts directly"),
 }
 
-SIDEBAR_ICONS = {
-    "welcome": "starred-symbolic",
-    "install": "system-software-install-symbolic",
-    "setup": "emblem-system-symbolic",
-    "updates": "software-update-available-symbolic",
-    "guides": "help-about-symbolic",
+DOCK_ICONS = {
+    "welcome":  "starred-symbolic",
+    "install":  "system-software-install-symbolic",
+    "setup":    "emblem-system-symbolic",
+    "updates":  "software-update-available-symbolic",
+    "guides":   "help-about-symbolic",
     "advanced": "applications-utilities-symbolic",
 }
 
@@ -62,108 +63,71 @@ class MainWindow(Adw.ApplicationWindow):
             "installed": False,    # refreshed by pages on demand
         }
 
-        self.split = Adw.NavigationSplitView.new()
-        self.split.set_max_sidebar_width(290)
-        self.split.set_min_sidebar_width(210)
-        self.set_content(self.split)
-
-        self._build_sidebar()
-        self._build_content()
-
-        self.state["installed"] = checks.installed_state()["installed"]
-        self.select_page("welcome")
-
-    # --------------------------------------------------------------- sidebar
-    def _build_sidebar(self) -> None:
-        sidebar_page = Adw.NavigationPage.new(Adw.ToolbarView.new(), "Navigation")
-        sidebar = sidebar_page.get_child()
-        sidebar.add_top_bar(Adw.HeaderBar.new())
-
-        self.listbox = Gtk.ListBox.new()
-        self.listbox.set_css_classes(["navigation-sidebar"])
-        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.listbox.connect("row-selected", self._on_row_selected)
-
-        for row_id, (label, _title, _sub) in PAGE_META.items():
-            box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
-            box.set_margin_top(6)
-            box.set_margin_bottom(6)
-            box.append(Gtk.Image.new_from_icon_name(SIDEBAR_ICONS[row_id]))
-            box.append(Gtk.Label.new(label))
-            row = Gtk.ListBoxRow.new()
-            row.set_child(box)
-            row.row_id = row_id  # type: ignore[attr-defined]
-            self.listbox.append(row)
-
-        scrolled = Gtk.ScrolledWindow.new()
-        scrolled.set_child(self.listbox)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_vexpand(True)
-        sidebar.set_content(scrolled)
-        self.split.set_sidebar(sidebar_page)
-
-    # --------------------------------------------------------------- content
-    def _build_content(self) -> None:
-        content_page = Adw.NavigationPage.new(Adw.ToolbarView.new(), paths.APP_NAME)
-        content_view = content_page.get_child()
+        # ---- root layout: ToolbarView → Overlay → (ToastOverlay + Dock) ----
+        toolbar_view = Adw.ToolbarView.new()
 
         self.header = Adw.HeaderBar.new()
-        self.title_widget = Adw.WindowTitle.new(PAGE_META["welcome"][1],
-                                                PAGE_META["welcome"][2])
+        self.title_widget = Adw.WindowTitle.new(
+            PAGE_META["welcome"][1], PAGE_META["welcome"][2])
         self.header.set_title_widget(self.title_widget)
-        content_view.add_top_bar(self.header)
+        toolbar_view.add_top_bar(self.header)
 
-        # A real toast overlay so feedback actually shows up.
+        overlay = Gtk.Overlay.new()
+        overlay.set_vexpand(True)
+        overlay.set_hexpand(True)
+
+        # Content stack (fills the overlay).
         self.toast_overlay = Adw.ToastOverlay.new()
         self.stack = Adw.ViewStack.new()
         self.stack.set_vexpand(True)
         self.stack.set_hexpand(True)
         self.toast_overlay.set_child(self.stack)
-        content_view.set_content(self.toast_overlay)
+        overlay.set_child(self.toast_overlay)
 
-        self.page_welcome = WelcomePage(self)
-        self.page_install = InstallPage(self)
-        self.page_setup = SetupPage(self)
-        self.page_updates = UpdatesPage(self)
-        self.page_guides = GuidesPage(self)
+        # Floating dock (overlaid at the bottom centre).
+        self.dock = FloatingDock(on_select=self.select_page)
+        for row_id, (_title, _sub) in PAGE_META.items():
+            self.dock.add_item(row_id, DOCK_ICONS[row_id], _title)
+        overlay.add_overlay(self.dock)
+
+        toolbar_view.set_content(overlay)
+        self.set_content(toolbar_view)
+
+        # Build pages --------------------------------------------------------
+        self.page_welcome  = WelcomePage(self)
+        self.page_install  = InstallPage(self)
+        self.page_setup    = SetupPage(self)
+        self.page_updates  = UpdatesPage(self)
+        self.page_guides   = GuidesPage(self)
         self.page_advanced = AdvancedPage(self)
 
         self.pages = {
-            "welcome": self.page_welcome,
-            "install": self.page_install,
-            "setup": self.page_setup,
-            "updates": self.page_updates,
-            "guides": self.page_guides,
+            "welcome":  self.page_welcome,
+            "install":  self.page_install,
+            "setup":    self.page_setup,
+            "updates":  self.page_updates,
+            "guides":   self.page_guides,
             "advanced": self.page_advanced,
         }
         for row_id, page in self.pages.items():
             self.stack.add_named(page, row_id)
 
-        self.split.set_content(content_page)
+        self.state["installed"] = checks.installed_state()["installed"]
+        self.select_page("welcome")
 
     # ------------------------------------------------------------ navigation
-    def _on_row_selected(self, _box: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
-        if row is None:
-            return
-        row_id = getattr(row, "row_id", None)
-        page = self.pages.get(row_id)
+    def select_page(self, page_id: str) -> None:
+        """Navigate to a page by id."""
+        page = self.pages.get(page_id)
         if page is None:
             return
         if hasattr(page, "on_navigate_to"):
             page.on_navigate_to()
-        self.stack.set_visible_child_name(row_id)
-        title, subtitle = PAGE_META[row_id][1], PAGE_META[row_id][2]
+        self.stack.set_visible_child_name(page_id)
+        title, subtitle = PAGE_META[page_id][1], PAGE_META[page_id][2]
         self.title_widget.set_title(title)
         self.title_widget.set_subtitle(subtitle)
-        self.split.set_show_content(True)
-
-    def select_page(self, row_id: str) -> None:
-        """Select a sidebar row by id (robust to reordering)."""
-        for i in range(len(PAGE_META)):
-            row = self.listbox.get_row_at_index(i)
-            if getattr(row, "row_id", None) == row_id:
-                self.listbox.select_row(row)
-                return
+        self.dock.set_active(page_id)
 
     def goto_setup(self) -> None:
         self.select_page("setup")
@@ -214,7 +178,7 @@ class MainWindow(Adw.ApplicationWindow):
             if not password:
                 self.toast("A password is required for this step.")
                 return
-            self.toast("Checking password…")
+            self.toast("Checking password\u2026")
 
             def worker() -> None:
                 ok = verify_sudo_password(password)
@@ -228,7 +192,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _after_verify(self, ok: bool, password: str,
                       on_ok: Callable[[], None]) -> bool:
         if not ok:
-            self.toast("Incorrect password — please try again.")
+            self.toast("Incorrect password \u2014 please try again.")
             self._prompt_password(on_ok)
             return False
         self.state["password"] = password
