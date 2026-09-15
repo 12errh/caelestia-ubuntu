@@ -86,7 +86,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Floating dock (overlaid at the bottom centre).
         self.dock = FloatingDock(on_select=self.select_page)
-        for row_id, (_title, _sub) in PAGE_META.items():
+        for row_id, (_label, _title, _sub) in PAGE_META.items():
             self.dock.add_item(row_id, DOCK_ICONS[row_id], _title)
         overlay.add_overlay(self.dock)
 
