@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from pathlib import Path
 
 import gi
@@ -19,8 +20,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from .. import checks, paths  # noqa: E402
+from ..page_style import load_page_css  # noqa: E402
 from ..runner import run_capture  # noqa: E402
-from .script_panel import ScriptPanel  # noqa: E402
+from ..wallpapers import ThumbnailLoader, scan_wallpapers  # noqa: E402
 
 
 def _load_shell_json() -> dict:
@@ -51,56 +53,100 @@ def _merge_into_shell_json(path: list[str], value) -> None:
 
 
 class SetupPage(Adw.Bin):
+    WALL_PAGE_SIZE = 6
+
     def __init__(self, win) -> None:
         super().__init__()
         self.win = win
         self._loading = False
         self._wall_state = ""
+        self._status_loading = False
+        self._wall_scan_loading = False
+        self._wall_scan_again = False
+        self._wall_page = 0
+        self._visible_wall_paths: list[Path] = []
+        self._wall_pictures: dict[Path, Gtk.Picture] = {}
+        self._thumbnails = ThumbnailLoader()
+        self._thumbnail_generation = 0
+        load_page_css()
+        self.add_css_class("setup-page")
 
         sc = Gtk.ScrolledWindow.new()
         sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sc.set_vexpand(True)
         clamp = Adw.Clamp.new()
-        clamp.set_maximum_size(760)
-        box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 18)
-        box.set_margin_top(18)
-        box.set_margin_bottom(24)
-        box.set_margin_start(18)
-        box.set_margin_end(18)
+        clamp.set_maximum_size(780)
+        box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 24)
+        box.set_margin_top(32)
+        box.set_margin_bottom(140)
+        box.set_margin_start(24)
+        box.set_margin_end(24)
         clamp.set_child(box)
         sc.set_child(clamp)
         self.set_child(sc)
 
+        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        hero.append(self._label("SETUP  /  YOUR DESKTOP", "setup-eyebrow"))
+        hero.append(self._label("Make yourself at home.", "setup-title"))
+        hero.append(self._label(
+            "Choose a backdrop, soften the details, and settle into your own rhythm.",
+            "setup-copy"))
+        box.append(hero)
         self._build_status(box)
         self._build_wallpapers(box)
         self._build_settings(box)
-        self._build_maintenance(box)
 
-        self.panel = ScriptPanel(win)
-        box.append(self.panel)
+    @staticmethod
+    def _label(text: str, css: str) -> Gtk.Label:
+        label = Gtk.Label(label=text, wrap=True, xalign=0)
+        label.add_css_class(css)
+        return label
 
     # ------------------------------------------------------------------ status
     def _build_status(self, parent: Gtk.Box) -> None:
         group = Adw.PreferencesGroup.new()
-        group.set_title("Status")
+        group.set_title("Your session")
+        group.add_css_class("setup-panel")
         self.row_service = Adw.ActionRow.new()
         self.row_service.set_title("Caelestia shell service")
+        self.row_service.add_prefix(Gtk.Image.new_from_icon_name("computer-symbolic"))
+        self.row_service.set_subtitle_lines(0)
         group.add(self.row_service)
 
         self.row_session = Adw.ActionRow.new()
         self.row_session.set_title("Hyprland session")
+        self.row_session.add_prefix(Gtk.Image.new_from_icon_name("preferences-desktop-symbolic"))
+        self.row_session.set_title_lines(0)
+        self.row_session.set_subtitle_lines(0)
         group.add(self.row_session)
         parent.append(group)
 
     def refresh_status(self) -> None:
-        state = checks.installed_state()
-        active = checks.service_active()
+        if self._status_loading:
+            return
+        self._status_loading = True
+        selection = self._wall_state
+
+        def worker():
+            state = checks.installed_state()
+            active = checks.service_active()
+            GLib.idle_add(self._apply_status, state, active, selection)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_status(self, state: dict, active: bool | None, selection: str) -> bool:
+        self._status_loading = False
+        # Refresh external changes, but never overwrite a selection made while
+        # the service query was pending.
+        if self._wall_state == selection:
+            self._wall_state = state.get("wallpaper") or ""
+        self._sync_wallpaper_selection()
         if not state["installed"]:
             self.row_service.set_title("Not installed")
             self.row_service.set_subtitle(
                 "Run the Install tab first — everything here activates afterwards.")
             self.row_session.set_title("—")
-            return
+            return GLib.SOURCE_REMOVE
         svc = {True: "running", False: "stopped", None: "unknown (not in session)"}[active]
         self.row_service.set_title(f"Shell service: {svc}")
         self.row_service.set_subtitle(
@@ -109,53 +155,133 @@ class SetupPage(Adw.Bin):
             "Registered at the login screen (gear menu → Hyprland)"
             if state["session_registered"] else
             "Session entry missing — re-run the install to register it")
-        self._wall_state = state.get("wallpaper") or ""
+        return GLib.SOURCE_REMOVE
 
     # -------------------------------------------------------------- wallpapers
     def _build_wallpapers(self, parent: Gtk.Box) -> None:
-        group = Adw.PreferencesGroup.new()
-        group.set_title("Wallpaper")
-        group.set_description(
-            "The whole interface recolours itself from the wallpaper. "
-            "Pictures from ~/Pictures/wallpapers are shown here.")
-
+        gallery = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        gallery.add_css_class("setup-panel")
+        gallery.append(self._label("WALLPAPER", "setup-eyebrow"))
+        gallery.append(self._label("Start with a different view.", "setup-section-title"))
+        gallery.append(self._label(
+            "Your wallpaper sets the palette for the whole shell. "
+            "Choose from your collection or bring something new.", "setup-copy"))
+        self.wall_current = self._label("No wallpaper selected", "setup-caption")
+        gallery.append(self.wall_current)
         self.flow = Gtk.FlowBox.new()
-        self.flow.set_min_children_per_line(4)
-        self.flow.set_max_children_per_line(5)
+        self.flow.set_min_children_per_line(1)
+        self.flow.set_max_children_per_line(3)
+        self.flow.set_column_spacing(12)
+        self.flow.set_row_spacing(12)
         self.flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.flow.set_homogeneous(True)
         self.flow.connect("child-activated", self._on_wallpaper_activated)
         self.flow.set_valign(Gtk.Align.START)
-
         self._wall_paths: list[Path] = []
-        flow_scroll = Gtk.ScrolledWindow.new()
-        flow_scroll.set_child(self.flow)
-        flow_scroll.set_min_content_height(200)
-        flow_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        group.add(flow_scroll)
-        parent.append(group)
-
-        self.btn_wall_more = Gtk.Button.new_with_label("Add image…")
-        self.btn_wall_more.set_css_classes(["flat"])
+        self.wall_scroll = Gtk.ScrolledWindow()
+        self.wall_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.wall_scroll.set_min_content_height(224)
+        self.wall_scroll.set_max_content_height(224)
+        self.wall_scroll.set_propagate_natural_height(True)
+        self.wall_scroll.set_child(self.flow)
+        gallery.append(self.wall_scroll)
+        pager = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.btn_wall_prev = Gtk.Button(label="Previous")
+        self.btn_wall_prev.add_css_class("pill")
+        self.btn_wall_prev.connect("clicked", lambda *_: self._change_wall_page(-1))
+        pager.append(self.btn_wall_prev)
+        self.wall_page_label = self._label("Loading wallpapers…", "setup-caption")
+        self.wall_page_label.set_hexpand(True)
+        self.wall_page_label.set_justify(Gtk.Justification.CENTER)
+        self.wall_page_label.set_xalign(0.5)
+        pager.append(self.wall_page_label)
+        self.btn_wall_next = Gtk.Button(label="Next")
+        self.btn_wall_next.add_css_class("pill")
+        self.btn_wall_next.connect("clicked", lambda *_: self._change_wall_page(1))
+        pager.append(self.btn_wall_next)
+        self.btn_wall_prev.set_sensitive(False)
+        self.btn_wall_next.set_sensitive(False)
+        gallery.append(pager)
+        self.wall_empty = self._label(
+            "A fresh canvas. Add an image to start your collection.", "setup-caption")
+        self.wall_empty.set_visible(False)
+        gallery.append(self.wall_empty)
+        self.btn_wall_more = Gtk.Button.new_with_label("Add an image…")
+        self.btn_wall_more.set_css_classes(["suggested-action", "setup-primary"])
+        self.btn_wall_more.set_halign(Gtk.Align.START)
         self.btn_wall_more.connect("clicked", self._pick_wallpaper)
-        group.add(self.btn_wall_more)
+        gallery.append(self.btn_wall_more)
+        parent.append(gallery)
 
     def refresh_wallpapers(self) -> None:
-        while self.flow.get_child_at_index(0):
-            self.flow.remove(self.flow.get_child_at_index(0))
-        self._wall_paths = []
-        seen: set[Path] = set()
-        for d in paths.WALLPAPER_DIRS:
-            if not d.is_dir():
-                continue
-            for p in sorted(d.iterdir()):
-                if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") and p not in seen:
-                    seen.add(p)
-                    self._wall_paths.append(p)
-                    self.flow.append(self._wall_tile(p))
-        current = self._wall_state or ""
-        for i, p in enumerate(self._wall_paths):
-            if str(p) == current:
+        if self._wall_scan_loading:
+            self._wall_scan_again = True
+            return
+        self._wall_scan_loading = True
+        directories = tuple(paths.WALLPAPER_DIRS)
+
+        def worker():
+            result = scan_wallpapers(directories)
+            GLib.idle_add(self._apply_wallpaper_scan, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_wallpaper_scan(self, result: list[Path]) -> bool:
+        self._wall_scan_loading = False
+        self._wall_paths = result
+        self._show_wall_page()
+        if self._wall_scan_again:
+            self._wall_scan_again = False
+            self.refresh_wallpapers()
+        return GLib.SOURCE_REMOVE
+
+    def _change_wall_page(self, delta: int) -> None:
+        self._wall_page += delta
+        self._show_wall_page()
+
+    def _show_wall_page(self) -> None:
+        total = len(self._wall_paths)
+        pages = max(1, (total + self.WALL_PAGE_SIZE - 1) // self.WALL_PAGE_SIZE)
+        self._wall_page = max(0, min(self._wall_page, pages - 1))
+        start = self._wall_page * self.WALL_PAGE_SIZE
+        visible = self._wall_paths[start:start + self.WALL_PAGE_SIZE]
+        # Reopening Setup does not reconstruct an unchanged visible gallery.
+        if visible != self._visible_wall_paths:
+            while child := self.flow.get_child_at_index(0):
+                self.flow.remove(child)
+            self._wall_pictures.clear()
+            self._visible_wall_paths = visible
+            for path in visible:
+                self.flow.append(self._wall_tile(path))
+        self._thumbnail_generation = self._thumbnails.request(visible, self._thumbnail_ready)
+        self.wall_scroll.get_vadjustment().set_value(0)
+        self.wall_page_label.set_label(
+            f"{start + 1}–{min(start + self.WALL_PAGE_SIZE, total)} of {total}"
+            if total else "No wallpapers")
+        self.btn_wall_prev.set_sensitive(self._wall_page > 0)
+        self.btn_wall_next.set_sensitive(self._wall_page + 1 < pages)
+        self.wall_empty.set_visible(not total)
+        self.wall_scroll.set_visible(bool(total))
+        self._sync_wallpaper_selection()
+
+    def _thumbnail_ready(self, generation: int, path: Path, pixbuf) -> bool:
+        if generation != self._thumbnail_generation:
+            return GLib.SOURCE_REMOVE
+        picture = self._wall_pictures.get(path)
+        if picture is not None:
+            picture.set_pixbuf(pixbuf)
+            picture.get_parent().set_tooltip_text(
+                f"Apply wallpaper: {path.name}" if pixbuf is not None
+                else f"Preview unavailable: {path.name}")
+        return GLib.SOURCE_REMOVE
+
+    def _sync_wallpaper_selection(self) -> None:
+        current = self._wall_state
+        self.wall_current.set_label(
+            f"Current: {Path(current).name}" if current else "No wallpaper selected")
+        self.flow.unselect_all()
+        for i, path in enumerate(self._visible_wall_paths):
+            if str(path) == current:
                 self.flow.select_child(self.flow.get_child_at_index(i))
                 break
 
@@ -163,11 +289,10 @@ class SetupPage(Adw.Bin):
         btn = Gtk.Button.new()
         pic = Gtk.Picture.new()
         pic.set_content_fit(Gtk.ContentFit.COVER)
-        try:
-            pic.set_filename(str(path))
-        except Exception:  # noqa: BLE001
-            pass
-        pic.set_size_request(120, 78)
+        self._wall_pictures[path] = pic
+        pic.set_size_request(144, 96)
+        btn.add_css_class("setup-wall-tile")
+        btn.set_overflow(Gtk.Overflow.HIDDEN)
         btn.set_child(pic)
         btn.set_tooltip_text(f"Apply wallpaper: {path.name}")
         # The tile is a Button inside a FlowBoxChild; a FlowBox "child-activated"
@@ -178,9 +303,9 @@ class SetupPage(Adw.Bin):
 
     def _on_wallpaper_activated(self, _flow: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
         idx = child.get_index()
-        if idx >= len(self._wall_paths):
+        if idx >= len(self._visible_wall_paths):
             return
-        self._apply_wallpaper(self._wall_paths[idx])
+        self._apply_wallpaper(self._visible_wall_paths[idx])
 
     def _apply_wallpaper(self, path: Path) -> None:
         # Mirror what setup.sh does: state file + symlink; live-apply via CLI
@@ -197,6 +322,8 @@ class SetupPage(Adw.Bin):
         except OSError:
             pass
 
+        self._wall_state = str(path)
+        self._sync_wallpaper_selection()
         if shutil.which("caelestia") is None:
             self.win.toast(
                 f"Saved {path.name} — applied on next login (caelestia CLI missing)")
@@ -240,7 +367,7 @@ class SetupPage(Adw.Bin):
     # ---------------------------------------------------------------- settings
     def _build_settings(self, parent: Gtk.Box) -> None:
         group = Adw.PreferencesGroup.new()
-        group.set_title("Starter settings")
+        group.set_title("Look &amp; feel")
         group.set_description(
             "Written to ~/.config/caelestia/shell.json — the shell picks up "
             "changes live, no restart needed.")
@@ -296,20 +423,6 @@ class SetupPage(Adw.Bin):
         self.sw_inhibit_audio.connect("notify::active", self._set_inhibit_audio)
         idle.add(self.sw_inhibit_audio)
         parent.append(idle)
-
-        # --- quick actions -----------------------------------------------------
-        actions = Adw.PreferencesGroup.new()
-        actions.set_title("Quick actions")
-        self.btn_open_shell_json = Gtk.Button.new_with_label("Open shell.json in editor")
-        self.btn_open_shell_json.set_css_classes(["flat"])
-        self.btn_open_shell_json.connect("clicked", self._open_shell_json)
-        actions.add(self.btn_open_shell_json)
-
-        self.btn_restart_shell = Gtk.Button.new_with_label("Restart the shell service")
-        self.btn_restart_shell.set_css_classes(["flat"])
-        self.btn_restart_shell.connect("clicked", self._restart_shell)
-        actions.add(self.btn_restart_shell)
-        parent.append(actions)
 
     # settings writers ---------------------------------------------------------
     def _write_when_quiet(self, path: list[str], value, cb=None) -> None:
@@ -387,91 +500,6 @@ class SetupPage(Adw.Bin):
         if self._loading:
             return
         _merge_into_shell_json(["general", "idle", "inhibitWhenAudio"], sw.get_active())
-
-    # actions ---------------------------------------------------------------
-    def _open_shell_json(self, _b: Gtk.Button) -> None:
-        paths.SHELL_JSON.parent.mkdir(parents=True, exist_ok=True)
-        if not paths.SHELL_JSON.exists():
-            paths.SHELL_JSON.write_text("{}\n")
-        code, _out = run_capture(["xdg-open", str(paths.SHELL_JSON)], timeout=10)
-        if code != 0:
-            self.win.toast("Could not open an editor for shell.json")
-
-    def _restart_shell(self, _b: Gtk.Button) -> None:
-        code, _out = run_capture(
-            ["systemctl", "--user", "restart", "caelestia-shell.service"], timeout=30)
-        self.win.toast("Shell restarted" if code == 0 else
-                       "Could not restart (are you in the Hyprland session?)")
-
-    # ------------------------------------------------------------ maintenance
-    def _build_maintenance(self, parent: Gtk.Box) -> None:
-        group = Adw.PreferencesGroup.new()
-        group.set_title("Maintenance")
-
-        row_updates = Adw.ActionRow.new()
-        row_updates.set_title("Updates")
-        row_updates.set_subtitle(
-            "Check installed revisions against the pinned ones and apply updates.")
-        btn_open = Gtk.Button.new_with_label("Open")
-        btn_open.set_valign(Gtk.Align.CENTER)
-        btn_open.set_css_classes(["flat"])
-        btn_open.connect("clicked", lambda *_: self.win.goto_updates())
-        row_updates.add_suffix(btn_open)
-        group.add(row_updates)
-
-        row_uninstall = Adw.ActionRow.new()
-        row_uninstall.set_title("Uninstall")
-        row_uninstall.set_subtitle(
-            "Removes the desktop; your configs are archived to ~/.config first.")
-        btn2 = Gtk.Button.new_with_label("Run")
-        btn2.set_valign(Gtk.Align.CENTER)
-        btn2.set_css_classes(["destructive-action"])
-        btn2.connect("clicked", self._on_uninstall)
-        row_uninstall.add_suffix(btn2)
-        group.add(row_uninstall)
-        parent.append(group)
-
-    def _on_uninstall(self, _b: Gtk.Button) -> None:
-        try:
-            argv = ["bash", paths.script("uninstall.sh")]
-        except FileNotFoundError as exc:
-            self.win.toast(f"Cannot find uninstall.sh: {exc}")
-            return
-        self._confirm_run(
-            "Uninstall Caelestia?",
-            "Runs uninstall.sh: stops the shell service, removes binaries/QML "
-            "modules and archives your configs. GNOME was never touched.",
-            argv, title_label="uninstall.sh", danger=True)
-
-    def _confirm_run(self, heading: str, body: str, argv: list[str],
-                     title_label: str, danger: bool = False) -> None:
-        dialog = Adw.AlertDialog.new(heading, body)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("ok", "Run")
-        dialog.set_response_appearance(
-            "ok", Adw.ResponseAppearance.DESTRUCTIVE if danger
-            else Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("ok")
-        dialog.set_close_response("cancel")
-        dialog.connect("response", self._on_confirm_response, argv, title_label)
-        dialog.present(self.win)
-
-    def _on_confirm_response(self, _dialog, response: str, argv: list[str],
-                             title_label: str) -> None:
-        if response != "ok":
-            return
-        self.win.ensure_password(lambda: self._run_argv(argv, title_label))
-
-    def _run_argv(self, argv: list[str], title_label: str) -> None:
-        self.panel.start(
-            argv, title=title_label, password=self.win.state.get("password"),
-            done_note="Finished — see the log above.",
-            on_finished=self._maintenance_finished,
-        )
-
-    def _maintenance_finished(self, _code: int) -> None:
-        self.win.state["installed"] = checks.installed_state()["installed"]
-        self.refresh_status()
 
     # ----------------------------------------------------------------- hook
     def on_navigate_to(self) -> None:

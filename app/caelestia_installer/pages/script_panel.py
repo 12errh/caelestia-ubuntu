@@ -44,6 +44,7 @@ class ScriptPanel(Adw.Bin):
         super().__init__()
         self.win = win
         self.runner: ScriptRunner | None = None
+        self.cancel_requested = False
         self._stages = list(stages or SETUP_STAGES)
         self._stage_idx = 0
         self._t0 = 0.0
@@ -117,6 +118,7 @@ class ScriptPanel(Adw.Bin):
             self.win.toast("A script is already running — wait for it to finish.")
             return False
 
+        self.cancel_requested = False
         self.win.state["busy"] = True
         self._title = title
         self._done_note = done_note
@@ -157,6 +159,7 @@ class ScriptPanel(Adw.Bin):
 
     def _on_cancel(self, _b: Gtk.Button) -> None:
         if self.runner and self.runner.is_running():
+            self.cancel_requested = True
             self.stage_label.set_text("cancelling…")
             self.btn_cancel.set_sensitive(False)
             self.runner.cancel()
@@ -211,7 +214,11 @@ class ScriptPanel(Adw.Bin):
 
         buf = self.log_view.get_buffer()
         end = buf.get_end_iter()
-        if code == 0:
+        if self.cancel_requested:
+            self.stage_label.set_text(f"cancelled after {mins}m {secs:02d}s")
+            buf.insert_with_tags_by_name(
+                end, f"\n[cancelled] {self._title}.\n", "dim")
+        elif code == 0:
             self.stage_label.set_text(f"finished in {mins}m {secs:02d}s")
             self.progress.set_fraction(1.0)
             buf.insert_with_tags_by_name(end, f"\n[done] {self._title} finished successfully.\n", "ok")

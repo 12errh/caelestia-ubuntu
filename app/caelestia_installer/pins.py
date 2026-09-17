@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -208,6 +209,27 @@ def mark_tested_installed() -> bool:
     except (OSError, FileNotFoundError):
         return False
     return True
+
+
+def restore_snapshot(dest: Path, content: bytes) -> None:
+    """Atomically restore a captured file at its original repository path.
+
+    Raises OSError on failure so the caller can report unsuccessful recovery.
+    The persistent previous.conf remains available for a manual Revert.
+    """
+    temporary = None
+    try:
+        mode = dest.stat().st_mode & 0o777
+        with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(mode)
+        temporary.replace(dest)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def restore_previous() -> bool:

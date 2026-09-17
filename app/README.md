@@ -54,11 +54,48 @@ in [docs/INSTALL_APP.md](../docs/INSTALL_APP.md).
 | Tab | Purpose |
 |---|---|
 | **Welcome** | Status snapshot (installed or not, service running?) and quick entry points. |
-| **Install** | 5-step wizard: system checks → install options → sudo password → live progress log → result. Runs `setup.sh` with your chosen flags. Re-running is a safe repair. |
-| **Setup** | Post-install assistant: status, wallpaper picker (with thumbnails), starter settings (transparency, rounding, animation speed, font scale, idle/lock timers), restart shell, uninstall. |
-| **Updates** | Runs `update.sh --check` (read-only) and shows installed vs pinned vs upstream per component. *Apply updates* (enabled only when something differs from the pin) runs `update.sh --yes`. **Advanced — latest upstream** jumps every component to the newest upstream commit and rebuilds, then lets you *Mark tested & keep* (records the new known-good pins) or *Revert to previous* (restores the snapshot and rebuilds). Pin snapshots live in `~/.local/share/caelestia-ubuntu/pins`; configs and `shell.json` are never overwritten (they're snapshotted first). |
-| **Guides** | The full user guide: first login, every keybind, wallpaper & dynamic colours, idle/lock behaviour, updating, troubleshooting. |
-| **Advanced** | Directly run `update.sh` / `uninstall.sh [--purge-qt]` / `update.sh --check` with the same live log. |
+| **Install** | Four-step wizard: system checks → install options → sudo password → live progress and result. Runs `setup.sh` with your chosen flags. Expert overrides live in Advanced. |
+| **Setup** | Status, a paginated wallpaper gallery with background thumbnail loading, appearance controls and idle/lock settings. |
+| **Updates** | Read-only revision checks and normal updates to the project's pinned commits, with a live build log. Experimental builds and recovery live exclusively in Advanced. |
+| **Guides** | Expandable topics covering first login, keybinds, wallpaper, idle/lock behaviour, updating and troubleshooting. |
+| **Advanced** | Installation overrides (Qt version and disk-check override), shell configuration editor and restart, latest-upstream builds, Keep/Revert, runtime repair and confirmed uninstall options. Pin snapshots live in `~/.local/share/caelestia-ubuntu/pins`. |
+
+## App releases and tested desktop revisions
+
+These are two separate updates:
+
+- **Installer app:** Updates checks GitHub's latest stable release on its first
+  visit each app session, and again with **Recheck now**. A newer `vMAJOR.MINOR.PATCH`
+  release with an uploaded `.deb` enables **Get app update**. After confirmation,
+  it opens the official release page; download the package, finish any running
+  build, close the app, install the `.deb`, and relaunch. This is notification
+  and manual installation, **not silent self-updating**. Offline errors do not
+  prevent desktop update checks. No package is downloaded or executed by the app.
+  The tag workflow attaches the package and `SHA256SUMS`; installing the package
+  upgrades the app without rebuilding desktop components. Clone / `install.sh`
+  users should update using their original method to avoid shadowing installs.
+  Native `apt upgrade` delivery would require a signed APT repository, which is
+  not configured.
+- **Tested desktop pins:** Updates now also fetches `revisions.conf` from this
+  project's GitHub `main` branch in the background. Commit and push your tested
+  revisions there to publish them; no app release tag is needed. The check is
+  read-only and separate from component/upstream status. Offline or malformed
+  responses are reported, never adopted. Only full commit hashes for the five
+  supported components are accepted.
+
+When published pins differ, **Use published pins** asks for confirmation,
+backs up the local file for Advanced → Revert, then saves the published set and
+rechecks the component report. **Apply updates** is the separate rebuild step.
+A difference is not necessarily a newer version: experimental local pins can
+be ahead of the maintainer-tested set. Read-only repositories must be made
+writable by their owner or updated through the package installation; the app
+will report a write error rather than silently request elevated file access.
+
+The launcher icon now uses the same mark as the in-app dock. Existing installs
+need the updated `.deb` or a rerun of the same app installation method to replace
+its cached icon. A user-local installation can shadow a system-wide one; avoid
+mixing installation methods. If the desktop still displays its cached icon
+after reinstalling, log out and in again.
 
 ## How it runs the scripts
 
@@ -66,7 +103,7 @@ The scripts refuse to run as root (they need your real `$HOME`), so the
 app launches them on a **pseudo-terminal** as your user. When sudo
 prints its `password for …:` prompt, the app writes the password you
 entered on the wizard's auth page (or the password prompt shown when you
-start a privileged action from Setup/Updates/Advanced) into the PTY —
+start a privileged action from Updates/Advanced) into the PTY —
 exactly like typing it in a terminal. Before a privileged action the
 password is validated with `sudo -S -k -v`; if sudo already has a cached
 credential no prompt is needed. The password lives only in app memory: it
@@ -85,21 +122,24 @@ app/
 ├── install.sh                 # system/user install of the app itself
 ├── data/
 │   ├── io.github.CaelestiaUbuntu.Installer.desktop
-│   └── io.github.CaelestiaUbuntu.Installer.svg
+│   └── io.github.CaelestiaUbuntu.Installer.png
 └── caelestia_installer/
-    ├── main.py                # window shell + sidebar navigation
+    ├── main.py                # window shell + floating dock navigation
     ├── cli.py                 # --check headless mode
     ├── checks.py              # pre-flight checks + installed-state detection
     ├── runner.py              # PTY script runner with sudo auto-answer
     ├── paths.py               # repo/script/config path resolution
+    ├── releases.py            # stable app-release detection
+    ├── published.py           # read-only published desktop-pin checks
     ├── ui.py                  # shared GTK helpers
     └── pages/
         ├── welcome.py         # status + entry points
-        ├── install.py         # install wizard (carousel + checks)
-        ├── setup.py           # wallpaper, settings, maintenance
-        ├── updates.py         # revision drift report + apply
+        ├── install.py         # gated install wizard
+        ├── setup.py           # paginated wallpaper gallery + desktop settings
+        ├── updates.py         # app releases, published pins + component updates
         ├── guides.py          # built-in user guide content
-        ├── advanced.py        # run repository scripts directly
+        ├── advanced.py        # expert controls + recovery tools
+        ├── advanced_actions.py # confirmed maintenance actions
         └── script_panel.py    # shared live-log/progress widget
 ```
 

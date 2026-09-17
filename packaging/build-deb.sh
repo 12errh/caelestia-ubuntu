@@ -21,6 +21,11 @@ VERSION="${CAELESTIA_INSTALLER_VERSION:-}"
 if [ -z "$VERSION" ]; then
     VERSION="$(python3 -c "import sys; sys.path.insert(0, '$repo/app'); from caelestia_installer import VERSION; print(VERSION)")"
 fi
+# Stable tags and runtime comparisons use the same strict version format.
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "Version must be MAJOR.MINOR.PATCH (for example 1.2.3)" >&2
+    exit 1
+fi
 PKG="caelestia-installer"
 OUT="$repo/dist"
 STAGE="$OUT/${PKG}_${VERSION}_all"
@@ -38,6 +43,10 @@ install -m 0755 "$here/deb/caelestia-installer" "$STAGE/usr/bin/caelestia-instal
 
 cp -a "$repo/app/caelestia_installer" "$STAGE/usr/share/caelestia-installer/app/"
 cp -a "$repo/app/run.py"             "$STAGE/usr/share/caelestia-installer/app/"
+# Stamp only the payload, not the developer's source tree. A tagged package
+# must report its own version or it would keep offering the same app update.
+sed -i "s/^VERSION = .*/VERSION = \"$VERSION\"/" \
+    "$STAGE/usr/share/caelestia-installer/app/caelestia_installer/paths.py"
 
 cp -a "$repo/setup.sh" "$repo/update.sh" "$repo/uninstall.sh" \
       "$repo/revisions.conf" "$STAGE/usr/share/caelestia-installer/repo/"

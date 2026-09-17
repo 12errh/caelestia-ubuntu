@@ -34,14 +34,16 @@ wraps every script:
 - **Install wizard** — system checks, install options, sudo password
   (kept in memory only), live progress log and result. Re-running is a
   safe repair.
-- **Setup screen** — pick your **wallpaper** from thumbnails, tweak
-  starter settings (transparency, rounding, animation speed, font scale,
-  idle/lock timers), restart the shell, uninstall.
-- **Updates screen** — read-only revision report (installed vs pinned vs
-  upstream) and one-click apply with a live log. Its **Advanced** area
-  jumps to the newest upstream commits, then lets you *Keep* the tested
-  revisions as your known-good pins, *Revert*, or *Repair* the Quickshell
-  runtime — it never overwrites your configs or settings.
+- **Setup screen** — paginated wallpaper previews loaded in the background,
+  appearance controls (transparency, rounding, animation speed, font scale),
+  and idle/lock timers.
+- **Updates screen** — app release notifications, published maintainer-tested
+  revision checks, and desktop updates to accepted pins with a live log.
+  App updates open the release download page; installation is manual.
+- **Advanced tab** — install overrides, shell editor/restart, experimental
+  upstream builds, Keep/Revert, runtime repair, and confirmed uninstall.
+  Cancelling an upstream build restores pre-build pins, not installed binaries.
+  Revert restores saved pins and rebuilds; it is not a full system rollback.
 - **Built-in guides** — first login, every keybind, wallpaper & dynamic
   colours, idle/lock behaviour, updating and troubleshooting.
 

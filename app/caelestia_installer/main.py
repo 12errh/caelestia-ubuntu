@@ -10,6 +10,7 @@ All heavy work runs in threads; UI updates go through ``GLib.idle_add``.
 
 from __future__ import annotations
 
+import math
 import threading
 from typing import Callable
 
@@ -20,32 +21,45 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import VERSION, checks, paths  # noqa: E402
+from .motion import PageTransition  # noqa: E402
 from .dock import FloatingDock  # noqa: E402
+from . import glass  # noqa: E402
 from .pages.advanced import AdvancedPage  # noqa: E402
 from .pages.guides import GuidesPage  # noqa: E402
 from .pages.install import InstallPage  # noqa: E402
 from .pages.setup import SetupPage  # noqa: E402
 from .pages.updates import UpdatesPage  # noqa: E402
 from .pages.welcome import WelcomePage  # noqa: E402
+from . import theme  # noqa: E402
 from .runner import sudo_ready, verify_sudo_password  # noqa: E402
 
 # page id -> (page title, header subtitle)
 PAGE_META: dict[str, tuple[str, str, str]] = {
     "welcome":  ("Welcome",  "Welcome",  "Install, set up and learn Caelestia"),
     "install":  ("Install",  "Install",  "System checks, options and live progress"),
-    "setup":    ("Setup",    "Setup",    "Wallpaper, appearance and maintenance"),
+    "setup":    ("Setup",    "Setup",    "Wallpaper, appearance and idle settings"),
     "updates":  ("Updates",  "Updates",  "Check installed revisions and apply updates"),
     "guides":   ("Guides",   "Guides",   "First login, keybinds and troubleshooting"),
-    "advanced": ("Advanced", "Advanced", "Run repository scripts directly"),
+    "advanced": ("Advanced", "Advanced", "Installation overrides, experimental builds and recovery"),
 }
 
+# Dock icons, chosen so each glyph *says* what its tab does at the 20px idle
+# size (the dock briefly doubles them on hover, but 20px is the size that has
+# to read). Every name below is a long-standing Adwaita symbolic icon, so it
+# resolves on Ubuntu/Zorin/Mint/Pop!_OS alike; dock.py still falls back to a
+# generic glyph if a theme is missing one.
+#
+# Picked by rendering each candidate through the icon theme and comparing the
+# actual pixels, because names lie: on Zorin's theme emblem-system,
+# preferences-system and applications-system are the *same* picture, while
+# software-update-available draws as a packed badge that muddles at 20px.
 DOCK_ICONS = {
-    "welcome":  "starred-symbolic",
-    "install":  "system-software-install-symbolic",
-    "setup":    "emblem-system-symbolic",
-    "updates":  "software-update-available-symbolic",
-    "guides":   "help-about-symbolic",
-    "advanced": "applications-utilities-symbolic",
+    "welcome":  "go-home-symbolic",                 # house  -> the landing tab
+    "install":  "folder-download-symbolic",         # arrow into tray -> install the stack
+    "setup":    "preferences-system-symbolic",      # cog    -> appearance / settings
+    "updates":  "update-symbolic",                  # crisp circular arrows -> check & apply
+    "guides":   "accessories-dictionary-symbolic",  # open book -> the built-in manual
+    "advanced": "utilities-terminal-symbolic",      # $ prompt -> run repo scripts directly
 }
 
 
@@ -53,6 +67,7 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, **kwargs) -> None:
         super().__init__(application=app, **kwargs)
         self.set_title(paths.APP_NAME)
+        self.set_icon_name(paths.APP_ID)
         self.set_default_size(1000, 720)
         self.app = app
 
@@ -78,17 +93,39 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Content stack (fills the overlay).
         self.toast_overlay = Adw.ToastOverlay.new()
+        # The page fades to transparent during navigation. Keep its backdrop
+        # identical to the pages rather than exposing the decorative aurora.
         self.stack = Adw.ViewStack.new()
         self.stack.set_vexpand(True)
         self.stack.set_hexpand(True)
-        self.toast_overlay.set_child(self.stack)
+        self.transition = PageTransition(self.stack)
+        self._selected_page = None
+        self.toast_overlay.set_child(self.transition)
         overlay.set_child(self.toast_overlay)
 
-        # Floating dock (overlaid at the bottom centre).
+        # Floating dock (overlaid at the bottom centre) — wrapped in Liquid Glass.
         self.dock = FloatingDock(on_select=self.select_page)
-        for row_id, (_label, _title, _sub) in PAGE_META.items():
+        half = len(PAGE_META) // 2
+        for i, (row_id, (_label, _title, _sub)) in enumerate(PAGE_META.items()):
             self.dock.add_item(row_id, DOCK_ICONS[row_id], _title)
-        overlay.add_overlay(self.dock)
+            # Brand mark, dead centre: the same number of tabs either side of it.
+            if i + 1 == half:
+                self.dock.add_brand(paths.BRAND_LOGO, paths.APP_NAME)
+
+        # The glass panel floats above the content (source = toast_overlay) so
+        # it refracts whatever page is visible behind the dock.
+        self.glass_dock = glass.glassify(
+            self.dock,
+            self.toast_overlay,
+            glass.REGULAR,
+            corner_radius=16.0,
+            light=self._dock_light,
+            hover=self.dock,
+        )
+        self.glass_dock.set_margin_bottom(18)
+        self.glass_dock.set_halign(Gtk.Align.CENTER)
+        self.glass_dock.set_valign(Gtk.Align.END)
+        overlay.add_overlay(self.glass_dock)
 
         toolbar_view.set_content(overlay)
         self.set_content(toolbar_view)
@@ -119,14 +156,22 @@ class MainWindow(Adw.ApplicationWindow):
     def select_page(self, page_id: str) -> None:
         """Navigate to a page by id."""
         page = self.pages.get(page_id)
-        if page is None:
+        if page is None or page_id == self._selected_page:
             return
-        if hasattr(page, "on_navigate_to"):
-            page.on_navigate_to()
-        self.stack.set_visible_child_name(page_id)
-        title, subtitle = PAGE_META[page_id][1], PAGE_META[page_id][2]
-        self.title_widget.set_title(title)
-        self.title_widget.set_subtitle(subtitle)
+        order = list(self.pages)
+        previous = self._selected_page
+        self._selected_page = page_id
+        direction = 1 if previous is None or order.index(page_id) > order.index(previous) else -1
+
+        def commit() -> None:
+            if hasattr(page, "on_navigate_to"):
+                page.on_navigate_to()
+            self.stack.set_visible_child_name(page_id)
+            title, subtitle = PAGE_META[page_id][1], PAGE_META[page_id][2]
+            self.title_widget.set_title(title)
+            self.title_widget.set_subtitle(subtitle)
+
+        self.transition.navigate(commit, direction)
         self.dock.set_active(page_id)
 
     def goto_setup(self) -> None:
@@ -137,6 +182,18 @@ class MainWindow(Adw.ApplicationWindow):
 
     def goto_install(self) -> None:
         self.select_page("install")
+
+    def _dock_light(self) -> tuple[float, float]:
+        """Pointer direction from the glass dock centre — drives the specular rim."""
+        try:
+            mx = self.dock.mouse_x
+            if mx == math.inf:
+                return (0.0, -1.0)
+            alloc = self.glass_dock.get_allocation()
+            cx = alloc.x + alloc.width / 2.0
+            return ((mx - cx) / max(alloc.width / 2.0, 1.0), -1.0)
+        except Exception:  # noqa: BLE001
+            return (0.0, -1.0)
 
     # -------------------------------------------------------------- feedback
     def toast(self, message: str) -> None:
@@ -202,6 +259,7 @@ class MainWindow(Adw.ApplicationWindow):
 
 def run_gui() -> int:
     Adw.init()
+    theme.apply()          # before any window exists: no flash of default chrome
     app = Adw.Application(application_id=paths.APP_ID)
     app.set_version(VERSION)
 

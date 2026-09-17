@@ -7,3 +7,5 @@ __pycache__/
 .ruff_cache/
 dist/
 .freebuff/
+# Local visual-review artifact (not an app or release asset).
+/theme-preview.html

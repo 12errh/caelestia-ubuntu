@@ -7,8 +7,10 @@ app (Install tab → `setup.sh`).
 
 ## Requirements
 
-The runtime dependencies are the standard GTK4 bindings, already present on
-Ubuntu 24.04, Zorin OS 18, Linux Mint 22 and Pop!_OS 22.04 GNOME desktops:
+The GUI requires **GTK ≥ 4.14 and libadwaita ≥ 1.5**, as supplied by Ubuntu
+24.04 and compatible derivatives (for example Zorin OS 18 and Mint 22).
+Stock Ubuntu/Pop!_OS 22.04 has older libraries and cannot run this GUI without
+upgrading them; the command-line scripts have separate requirements.
 
 | Package | Why |
 |---|---|
@@ -45,7 +47,7 @@ caelestia-installer
 /usr/share/caelestia-installer/app/                            # the Python app
 /usr/share/caelestia-installer/repo/                           # setup/update/uninstall + configs
 /usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop
-/usr/share/icons/hicolor/scalable/apps/io.github.CaelestiaUbuntu.Installer.svg
+/usr/share/icons/hicolor/128x128/apps/io.github.CaelestiaUbuntu.Installer.png
 ```
 
 On first launch the launcher copies the repo scripts/configs to a
@@ -55,12 +57,31 @@ On first launch the launcher copies the repo scripts/configs to a
 ~/.local/share/caelestia-installer/repo/
 ```
 
-and points `CAEL_REPO_DIR` at it. This is deliberate: the Updates →
-Advanced workflow writes `revisions.conf`, and `/usr/share` is root-owned.
+and points `CAEL_REPO_DIR` at it. This is deliberate: the
+Advanced tab writes `revisions.conf`, and `/usr/share` is root-owned.
 Keeping the working copy in your home means **Keep / Revert / Update
 latest upstream** work without root, and the user's tested pins are never
 clobbered on package upgrades (scripts and configs refresh; `revisions.conf`
 is preserved).
+
+### Updating the app
+
+Open **Updates**: the first visit per app session checks GitHub for a newer stable
+`vMAJOR.MINOR.PATCH` release with an uploaded package. **Recheck now** retries,
+including after offline or rate-limit errors. **Get app update** asks before
+opening the official release page. Download the `.deb`, finish any desktop build,
+close the app, install that package with your software installer or `sudo apt
+install /absolute/path/to/package.deb`, and relaunch.
+
+This is **update notification plus manual installation**, not automatic package
+installation or an APT repository. It does not rebuild desktop components.
+Published desktop revisions are checked separately; **Use published pins** and
+**Apply updates** are explicit steps. Existing local pins survive app upgrades.
+
+If running from a clone, update that checkout and restart. For `install.sh`
+installs, update the source and rerun the same installation command. Do not mix
+user-local, `/usr/local`, and `.deb` installs: older launchers/icons can shadow the
+updated package. Versions without this checker need one manual upgrade first.
 
 ### Uninstall
 
@@ -101,8 +122,33 @@ cd caelestia-ubuntu
 sudo apt install ./dist/caelestia-installer_*_all.deb
 ```
 
-The CI workflow (`.github/workflows/deb.yml`) automates this and attaches
-the package to every tagged release.
+The CI workflow (`.github/workflows/deb.yml`) builds on main pushes and pull
+requests, and attaches a package plus `SHA256SUMS` to `vMAJOR.MINOR.PATCH` tags.
+Other version formats are rejected by the package builder.
+
+### Release checklist
+
+1. On a supported GTK desktop, run from the repository root:
+   `G_DEBUG=fatal-warnings PYTHONPATH=app /usr/bin/python3 -m pytest app/tests -q`.
+   Tests require pytest and the GUI dependencies above; build tests use harmless
+   substitute processes and temporary files rather than installing the desktop.
+2. Run `ruff check app/caelestia_installer app/tests`, `git diff --check`, and
+   `bash packaging/build-deb.sh`. Build outputs in `dist/` are ignored by Git.
+3. Set `VERSION` in `app/caelestia_installer/paths.py` to the intended stable
+   version, review and commit all source/assets/tests/docs, then push main.
+4. Create and push the matching `vMAJOR.MINOR.PATCH` tag on that commit. Wait for
+   the package workflow to succeed and verify the release contains its `.deb`
+   and `SHA256SUMS`. Tag builds stamp the package's runtime version automatically
+   without editing the source checkout.
+5. Keep the release published and stable (not draft/prerelease). Existing apps
+   with the checker offer it on the next Updates visit or **Recheck now**, once
+   GitHub's latest-release API reports it and the package asset is uploaded.
+
+The app does not poll continuously, install packages automatically, or subscribe
+users to an APT repository. Older app versions without the checker require one
+manual upgrade. A local build validates packaging, not installation on a fresh
+Ubuntu machine; test that separately before declaring a release supported.
+
 
 ## Other formats
 

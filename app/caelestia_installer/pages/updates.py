@@ -8,9 +8,7 @@ through the shared live-log panel.
 
 from __future__ import annotations
 
-import os
 import re
-import shlex
 import threading
 import time
 
@@ -20,8 +18,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from .. import checks, paths, pins  # noqa: E402
+from .. import checks, paths, pins, published, releases  # noqa: E402
 from ..runner import run_capture, strip_ansi  # noqa: E402
+from ..page_style import build_page  # noqa: E402
 from .script_panel import ScriptPanel  # noqa: E402
 
 # "  quickshell   local abc123 | pinned def456 | upstream 789abc"
@@ -99,6 +98,9 @@ class UpdatesPage(Adw.Bin):
         super().__init__()
         self.win = win
         self._checking = False
+        self._published_checking = False
+        self._published_pins = None
+        self._published_snapshot = None
         self._checked_once = False
         self._has_updates = False
         self._has_upstream_moved = False
@@ -107,31 +109,37 @@ class UpdatesPage(Adw.Bin):
         self._status_labels: dict[str, Gtk.Label] = {}
         self._row_icons: dict[str, Gtk.Image] = {}
 
-        sc = Gtk.ScrolledWindow.new()
-        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sc.set_vexpand(True)
-        clamp = Adw.Clamp.new()
-        clamp.set_maximum_size(820)
-        box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 18)
-        box.set_margin_top(18)
-        box.set_margin_bottom(24)
-        box.set_margin_start(18)
-        box.set_margin_end(18)
-        clamp.set_child(box)
-        sc.set_child(clamp)
-        self.set_child(sc)
+        box = build_page(self, "UPDATES  /  PINNED & TESTED",
+                         "Keep the good things current.",
+                         "Update to the project's pinned revisions. Newer upstream builds "
+                         "are optional and live in Advanced.")
 
-        intro = Gtk.Label.new(
-            "installed = what your machine built  ·  pinned = the known-good "
-            "commit in <tt>revisions.conf</tt>  ·  upstream = latest upstream.\n"
-            "The installer never silently follows upstream: <i>Up to date</i> "
-            "means it matches the pinned revision. Apply rebuilds to the pin; "
-            "moving to newer upstream is a deliberate action.")
-        intro.set_use_markup(True)
-        intro.set_wrap(True)
-        intro.set_xalign(0.0)
-        intro.set_css_classes(["dim-label"])
-        box.append(intro)
+        self._app_checking = False
+        self._app_release = None
+        app_group = Adw.PreferencesGroup(
+            title="Installer app", description="App releases are separate from desktop builds.")
+        app_group.add_css_class("page-panel")
+        self.app_row = Adw.ActionRow(
+            title=f"Caelestia for Ubuntu · {paths.VERSION}",
+            subtitle="Not checked yet", use_markup=False)
+        self.app_row.set_subtitle_lines(0)
+        self.btn_app_update = Gtk.Button(label="Get app update", valign=Gtk.Align.CENTER)
+        self.btn_app_update.set_sensitive(False)
+        self.btn_app_update.connect("clicked", self._on_app_update)
+        self.app_row.add_suffix(self.btn_app_update)
+        app_group.add(self.app_row)
+        box.append(app_group)
+
+        published_group = Adw.PreferencesGroup(title="Maintainer-tested revisions")
+        self.published_row = Adw.ActionRow(
+            title="Published revisions · main", subtitle="Not checked yet", use_markup=False)
+        self.published_row.set_subtitle_lines(0)
+        self.btn_adopt = Gtk.Button(label="Use published pins", valign=Gtk.Align.CENTER)
+        self.btn_adopt.set_sensitive(False)
+        self.btn_adopt.connect("clicked", self._on_adopt)
+        self.published_row.add_suffix(self.btn_adopt)
+        published_group.add(self.published_row)
+        box.append(published_group)
 
         # Prominent "updates available" banner ------------------------------
         self.banner = Adw.Banner.new("")
@@ -145,6 +153,7 @@ class UpdatesPage(Adw.Bin):
 
         self.summary_row = Adw.ActionRow.new()
         self.summary_row.set_title("Status")
+        self.summary_row.set_subtitle_lines(0)
         self.summary_row.set_subtitle("Not checked yet")
         self.summary_icon = Gtk.Image.new_from_icon_name(_ICONS["unknown"][0])
         self.summary_icon.set_valign(Gtk.Align.CENTER)
@@ -156,6 +165,8 @@ class UpdatesPage(Adw.Bin):
             row = Adw.ActionRow.new()
             row.set_title(DISPLAY_NAMES.get(key, key))
             row.set_subtitle("Not checked yet")
+            row.set_subtitle_lines(0)
+            row.set_use_markup(False)
             icon = Gtk.Image.new_from_icon_name(_ICONS["unknown"][0])
             icon.set_valign(Gtk.Align.CENTER)
             icon.set_css_classes(["dim-label"])
@@ -181,18 +192,20 @@ class UpdatesPage(Adw.Bin):
         box.append(self.group)
 
         btns = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
-        btns.set_halign(Gtk.Align.START)
+        btns.set_hexpand(True)
         self.spinner = Gtk.Spinner.new()
         self.btn_check = Gtk.Button.new_with_label("Recheck now")
         self.btn_check.set_tooltip_text("Run update.sh --check again (read-only)")
         self.btn_check.connect("clicked", lambda *_: self.refresh_async(force=True))
         self.btn_apply = Gtk.Button.new_with_label("Apply updates")
-        self.btn_apply.set_css_classes(["suggested-action"])
+        self.btn_apply.set_css_classes(["suggested-action", "page-primary"])
         self.btn_apply.set_sensitive(False)
         self.btn_apply.set_tooltip_text("No updates available — run a check first.")
         self.btn_apply.connect("clicked", self._on_apply)
         btns.append(self.spinner)
         btns.append(self.btn_check)
+        self.btn_check.add_css_class("pill")
+        btns.append(Gtk.Box(hexpand=True))
         btns.append(self.btn_apply)
         box.append(btns)
 
@@ -201,7 +214,6 @@ class UpdatesPage(Adw.Bin):
         self.checked_label.set_css_classes(["dim-label"])
         box.append(self.checked_label)
 
-        self._build_advanced(box)
 
         self.raw_expander = Adw.ExpanderRow.new()
         self.raw_expander.set_title("Raw update.sh output")
@@ -214,14 +226,17 @@ class UpdatesPage(Adw.Bin):
         raw_row.set_activatable(False)
         raw_row.set_child(self.raw_label)
         self.raw_expander.add_row(raw_row)
-        box.append(self.raw_expander)
+        report = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        report.add_css_class("boxed-list")
+        report.append(self.raw_expander)
+        box.append(report)
 
         self.panel = ScriptPanel(win)
+        self.panel.add_css_class("page-panel")
         box.append(self.panel)
 
     # ------------------------------------------------------------------ hook
     def on_navigate_to(self) -> None:
-        self._refresh_advanced()
         # Auto-check only the first time the tab is opened in this app run; the
         # "Recheck now" button forces a fresh network check afterwards.
         if not self._checked_once:
@@ -238,170 +253,166 @@ class UpdatesPage(Adw.Bin):
 
     def _refresh_apply_button(self) -> None:
         """Apply is only actionable when a checked report found updates."""
-        idle = not self._checking and not self.win.state.get("busy")
+        idle = (not self._checking and not self._published_checking
+                and not self.win.state.get("busy"))
+        self.btn_app_update.set_sensitive(
+            self._app_release is not None and not self._app_checking
+            and not self.win.state.get("busy"))
+        self.btn_adopt.set_sensitive(bool(self._published_pins) and idle)
         enabled = self._has_updates and idle
         self.btn_apply.set_sensitive(enabled)
         self.btn_apply.set_tooltip_text(
             None if enabled else "No updates available — run a check first.")
-        self._refresh_advanced_buttons()
 
-    # ---------------------------------------------------------- advanced UI
-    def _build_advanced(self, parent: Gtk.Box) -> None:
-        group = Adw.PreferencesGroup.new()
-        group.set_title("Advanced — latest upstream")
-        group.set_description(
-            "Installed revisions match the pin, so there is normally nothing to "
-            "apply here. This jumps every component to the newest upstream "
-            "commit, rebuilds it, and lets you keep it as your known-good pin "
-            "after testing — or revert. It rebuilds sources only: your configs "
-            "and shell.json are never overwritten (shell.json is snapshotted "
-            "first).")
+    def _check_app_async(self) -> None:
+        if self._app_checking:
+            return
+        self._app_checking = True
+        self._app_release = None
+        self.btn_app_update.set_sensitive(False)
+        self.app_row.set_subtitle("Checking stable GitHub releases…")
 
-        self.adv_state_row = Adw.ActionRow.new()
-        self.adv_state_row.set_title("Revision state")
-        self.adv_state_row.set_subtitle("Checking…")
-        self.adv_state_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
-        self.adv_state_icon.set_valign(Gtk.Align.CENTER)
-        self.adv_state_icon.set_css_classes(["dim-label"])
-        self.adv_state_row.add_prefix(self.adv_state_icon)
-        group.add(self.adv_state_row)
+        def worker():
+            try:
+                release = releases.fetch_latest()
+                if release is not None:
+                    release.newer_than(paths.VERSION)
+            except (OSError, ValueError) as exc:
+                GLib.idle_add(self._app_result, None, str(exc))
+            else:
+                GLib.idle_add(self._app_result, release, "")
+        threading.Thread(target=worker, daemon=True).start()
 
-        self.adv_pins_row = Adw.ActionRow.new()
-        self.adv_pins_row.set_title("Pins")
-        self.adv_pins_row.set_subtitle("—")
-        group.add(self.adv_pins_row)
-
-        self.adv_repo_row = Adw.ActionRow.new()
-        self.adv_repo_row.set_title("Revision file")
-        self.adv_repo_row.set_subtitle("—")
-        group.add(self.adv_repo_row)
-
-        self.adv_runtime_row = Adw.ActionRow.new()
-        self.adv_runtime_row.set_title("Quickshell runtime")
-        self.adv_runtime_row.set_subtitle("Checking…")
-        self.btn_repair = Gtk.Button.new_with_label("Repair")
-        self.btn_repair.set_valign(Gtk.Align.CENTER)
-        self.btn_repair.set_css_classes(["flat"])
-        self.btn_repair.set_sensitive(False)
-        self.btn_repair.set_tooltip_text(
-            "Re-apply the Qt RPATH to /usr/local/bin/quickshell so `qs` runs "
-            "without LD_LIBRARY_PATH (needed for update checks and IPC).")
-        self.btn_repair.connect("clicked", self._on_repair_runtime)
-        self.adv_runtime_row.add_suffix(self.btn_repair)
-        group.add(self.adv_runtime_row)
-        parent.append(group)
-
-        btns = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
-        btns.set_halign(Gtk.Align.START)
-
-        self.btn_upstream = Gtk.Button.new_with_label("Update to latest upstream")
-        self.btn_upstream.set_css_classes(["destructive-action"])
-        self.btn_upstream.connect("clicked", self._on_update_upstream)
-        self.btn_keep = Gtk.Button.new_with_label("Mark tested & keep")
-        self.btn_keep.connect("clicked", self._on_keep_tested)
-        self.btn_revert = Gtk.Button.new_with_label("Revert to previous")
-        self.btn_revert.connect("clicked", self._on_revert)
-        btns.append(self.btn_upstream)
-        btns.append(self.btn_keep)
-        btns.append(self.btn_revert)
-        parent.append(btns)
-
-        self.adv_hint = Gtk.Label.new(
-            "Test a new build by logging into Hyprland; if the shell looks "
-            "right, Keep — otherwise Revert.")
-        self.adv_hint.set_wrap(True)
-        self.adv_hint.set_xalign(0.0)
-        self.adv_hint.set_css_classes(["dim-label"])
-        parent.append(self.adv_hint)
-
-    def _refresh_advanced(self) -> None:
-        try:
-            pins.seed_if_needed()
-            cur = pins.current()
-            known = pins.known_good()
-        except FileNotFoundError:
-            cur, known = {}, {}
-        prev = pins.previous()
-        inst = pins.installed_revisions()
-        self._pins_cur, self._pins_known = cur, known
-        self._pins_prev, self._pins_inst = prev, inst
-
-        self.adv_pins_row.set_subtitle(
-            f"installed: {pins.short(inst)}\n"
-            f"pinned: {pins.short(cur)}\n"
-            f"known-good: {pins.short(known)}\n"
-            f"previous: {pins.short(prev)}")
-        self.adv_pins_row.set_subtitle_lines(0)
-
-        try:
-            self.adv_repo_row.set_subtitle(str(pins.revisions_path()))
-        except FileNotFoundError:
-            self.adv_repo_row.set_subtitle("repository not found")
-
-        broken = self._runtime_broken()
-        self._runtime_broken_state = broken
-        installed = bool(self.win.state.get("installed"))
-        if not installed:
-            self.adv_runtime_row.set_subtitle("Not installed")
-        elif broken:
-            self.adv_runtime_row.set_subtitle(
-                "qs does not run without LD_LIBRARY_PATH — click Repair.")
+    def _app_result(self, release, error) -> bool:
+        self._app_checking = False
+        if error:
+            self.app_row.set_subtitle(f"App update check unavailable: {error}")
+        elif release is None:
+            self.app_row.set_subtitle("No stable app release has been published yet.")
+        elif release.newer_than(paths.VERSION):
+            self._app_release = release
+            self.app_row.set_subtitle(
+                f"Version {release.version} is available. Download and install the .deb, "
+                "then restart the app. Desktop components are not rebuilt.")
         else:
-            self.adv_runtime_row.set_subtitle("ok — qs runs standalone.")
+            self.app_row.set_subtitle(
+                f"No newer stable app release (latest: {release.version}).")
+        self._refresh_apply_button()
+        return False
 
-        if not inst:
-            state, css = "No revisions found — is the repository present?", "dim-label"
-        elif inst != known:
-            state, css = ("Installed revisions differ from your known-good pins — "
-                          "test in Hyprland, then Keep to record them or Revert.",
-                          "warning")
+    def _on_app_update(self, _button) -> None:
+        if self._app_release is None or self.win.state.get("busy"):
+            return
+        url = self._app_release.url
+        dialog = Adw.AlertDialog.new(
+            "Update the installer app?",
+            "Open the official release page and download its .deb. Wait for any desktop "
+            "build to finish, close this app, then open the package in your software "
+            "installer or install it with sudo apt install /absolute/path/to/package.deb. "
+            "Restart the app afterward. If you installed from a clone or install.sh, "
+            "update using that same method instead to avoid duplicate installations.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("open", "Open release page")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def response(_dialog, choice):
+            if choice != "open" or self.win.state.get("busy"):
+                return
+            launcher = Gtk.UriLauncher.new(url)
+            launcher.launch(self.win, None, self._app_release_opened)
+        dialog.connect("response", response)
+        dialog.present(self.win)
+
+    def _app_release_opened(self, launcher, result) -> None:
+        try:
+            launcher.launch_finish(result)
+        except GLib.Error as exc:
+            self.win.toast(f"Could not open the release page: {exc.message}")
+
+    def _check_published_async(self) -> None:
+        self._published_checking = True
+        self._published_pins = None
+        self._published_snapshot = None
+        self.published_row.set_subtitle("Checking the project's published revisions…")
+        self._refresh_apply_button()
+
+        def worker():
+            try:
+                destination = pins.revisions_path()
+                original = destination.read_bytes()
+                mapping = published.fetch()
+            except (OSError, ValueError) as exc:
+                GLib.idle_add(self._published_result, None, None, str(exc))
+            else:
+                GLib.idle_add(self._published_result, mapping, (destination, original), "")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _published_result(self, mapping, snapshot, error) -> bool:
+        self._published_checking = False
+        if error:
+            self.published_row.set_subtitle(
+                f"Published check unavailable: {error}. Local component results are separate.")
         else:
-            state, css = ("Stable — installed revisions match your known-good "
-                          "pins."), "success"
-        self.adv_state_row.set_subtitle(state)
-        self.adv_state_row.set_subtitle_lines(0)
-        self.adv_state_icon.set_css_classes([css])
-        self._refresh_advanced_buttons()
+            local = pins.parse(snapshot[1].decode("utf-8", errors="replace"))
+            changed = [key for key in pins.COMPONENTS if local.get(key) != mapping[key]]
+            if changed:
+                self._published_pins = mapping
+                self._published_snapshot = snapshot
+                self.published_row.set_subtitle(
+                    "Published tested pins differ: " + ", ".join(changed)
+                    + ". Adopt explicitly, then Apply updates. Local experimental pins "
+                    "may be ahead; this is not a chronological version comparison.")
+            else:
+                self.published_row.set_subtitle("Local pins match the published tested revisions.")
+        self._refresh_apply_button()
+        return False
 
-    def _refresh_advanced_buttons(self) -> None:
-        idle = not self._checking and not self.win.state.get("busy")
-        installed = bool(self.win.state.get("installed"))
-        known = getattr(self, "_pins_known", {})
-        prev = getattr(self, "_pins_prev", {})
-        inst = getattr(self, "_pins_inst", {})
-        writable = pins.repo_writable()
+    def _on_adopt(self, _button) -> None:
+        if (not self._published_pins or self._checking or self._published_checking
+                or self.win.state.get("busy")):
+            return
+        mapping = dict(self._published_pins)
+        snapshot = self._published_snapshot
+        dialog = Adw.AlertDialog.new(
+            "Use the published tested revisions?",
+            "Replaces your local revision pins with the maintainer's published set. "
+            "Experimental pins may be newer. Your current revision file is backed up "
+            "for Advanced → Revert. No components are built now; use Apply updates "
+            "after the next check to rebuild toward these pins.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("use", "Use published pins")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
 
-        self.btn_upstream.set_sensitive(idle and installed and writable)
-        self.btn_upstream.set_tooltip_text(
-            None if (installed and writable) else
-            ("Install Caelestia first." if not installed else
-             "revisions.conf is not writable (system install) — run from a clone "
-             "or install with app/install.sh --user."))
-        # Keep records the *installed* revisions as the pins, so it is offered
-        # whenever they differ from the known-good set.
-        self.btn_keep.set_sensitive(idle and bool(inst) and inst != known)
-        self.btn_revert.set_sensitive(
-            idle and bool(inst) and bool(prev) and prev != inst)
-        self.btn_repair.set_sensitive(
-            idle and installed and self._runtime_broken_state)
+        def response(_dialog, choice):
+            if choice != "use":
+                return
+            if self.win.state.get("busy") or self._checking or self._published_checking:
+                self.win.toast("Wait for the current operation to finish, then try again.")
+                return
+            try:
+                published.adopt(mapping, *snapshot)
+            except (OSError, ValueError) as exc:
+                self.win.toast(f"Could not adopt published revisions: {exc}")
+                return
+            self._has_updates = False
+            self.win.toast("Published pins saved. Checking what needs rebuilding…")
+            self.refresh_async(force=True)
 
-    def _runtime_broken(self) -> bool:
-        """True when the installed qs cannot run without LD_LIBRARY_PATH."""
-        if not self.win.state.get("installed"):
-            return False
-        qs = str(paths.QS_BIN)
-        if not os.path.exists(qs):
-            return False
-        code, _out = run_capture(
-            ["env", "-u", "LD_LIBRARY_PATH", qs, "--version"], timeout=15)
-        return code != 0
+        dialog.connect("response", response)
+        dialog.present(self.win)
 
     # ----------------------------------------------------------------- check
     def refresh_async(self, force: bool = False) -> None:
-        if self._checking or self.win.state.get("busy"):
+        if self._checking or self._published_checking or self.win.state.get("busy"):
             return
         if self._checked_once and not force:
             return
+        self._checked_once = True
+        self._check_app_async()
+        self._check_published_async()
         state = checks.installed_state()
         if not state["installed"]:
             self.raw_label.set_text(
@@ -467,7 +478,6 @@ class UpdatesPage(Adw.Bin):
             self.checked_label.set_text(
                 f"Last checked at {time.strftime('%H:%M:%S')}.")
         self._refresh_apply_button()
-        self._refresh_advanced()
         return False
 
     def _parse_output(self, output: str) -> None:
@@ -547,8 +557,7 @@ class UpdatesPage(Adw.Bin):
                     f"All pinned revisions installed. {len(pinned_behind)} "
                     f"component{'s' if len(pinned_behind) != 1 else ''} "
                     f"({', '.join(pinned_behind)}) have newer upstream commits "
-                    "— pinning is intentional; use update.sh --update-sources to "
-                    "move to them.")
+                    "— pinning is intentional. Use Advanced to try newer builds.")
             else:
                 self._set_summary("ok")
 
@@ -561,8 +570,9 @@ class UpdatesPage(Adw.Bin):
         if not self._has_updates:
             self.win.toast("No updates available — run a check first.")
             return
-        if self.win.state.get("busy"):
-            self.win.toast("A script is already running — wait for it to finish.")
+        if (self.win.state.get("busy") or self._checking
+                or self._published_checking):
+            self.win.toast("Wait for the current operation to finish.")
             return
         dialog = Adw.AlertDialog.new(
             "Apply updates?",
@@ -595,162 +605,5 @@ class UpdatesPage(Adw.Bin):
             on_finished=self._apply_finished,
         )
 
-    def _on_update_upstream(self, _b: Gtk.Button) -> None:
-        if self.win.state.get("busy"):
-            self.win.toast("A script is already running — wait for it to finish.")
-            return
-        dialog = Adw.AlertDialog.new(
-            "Update to the latest upstream commits?",
-            "This fetches the newest upstream commit of every component, "
-            "rewrites revisions.conf, and rebuilds them. It deliberately jumps "
-            "ahead of the known-good pins, so it may break — you can Revert "
-            "afterwards. Your configs and shell.json are not touched (a copy is "
-            "saved first). Rebuilding can take a while.",
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("ok", "Update & build")
-        dialog.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        def on_response(_d, response: str) -> None:
-            if response != "ok":
-                return
-            self.win.ensure_password(self._start_update_upstream, force=True)
-
-        dialog.connect("response", on_response)
-        dialog.present(self.win)
-
-    def _start_update_upstream(self) -> None:
-        try:
-            argv = ["bash", paths.script("update.sh"), "--update-sources", "--yes"]
-        except FileNotFoundError as exc:
-            self.win.toast(f"Cannot find update.sh: {exc}")
-            return
-        # Save the one-step undo target and a copy of the user's settings.
-        pins.snapshot_previous()
-        backup = pins.backup_shell_json()
-        if backup is not None:
-            self.win.toast(f"Saved settings backup: {backup.name}")
-        started = self.panel.start(
-            argv, title="update.sh --update-sources",
-            password=self.win.state.get("password"),
-            done_note="Latest upstream built — test in Hyprland, then Keep or Revert.",
-            on_finished=self._upstream_finished,
-        )
-        if started:
-            self._refresh_advanced()
-
-    def _upstream_finished(self, code: int) -> None:
-        self._refresh_advanced()
-        self.refresh_async(force=True)
-        if code == 0:
-            self.win.toast("Latest upstream built. Test it, then Keep or Revert.")
-        else:
-            self.win.toast("Upstream update failed — use Revert to go back.")
-
-    # ---------------------------------------------------------- keep / revert
-    def _on_keep_tested(self, _b: Gtk.Button) -> None:
-        if self.win.state.get("busy"):
-            self.win.toast("A script is already running — wait for it to finish.")
-            return
-        if pins.mark_tested_installed():
-            self.win.toast("Tested revisions recorded as the known-good pins.")
-        else:
-            self.win.toast("Could not record the pins (is revisions.conf writable?).")
-        self._refresh_advanced()
-        self.refresh_async(force=True)
-
-    def _on_revert(self, _b: Gtk.Button) -> None:
-        if self.win.state.get("busy"):
-            self.win.toast("A script is already running — wait for it to finish.")
-            return
-        dialog = Adw.AlertDialog.new(
-            "Revert to the previous pins?",
-            "Restores the revisions.conf snapshot taken before the last change "
-            "and rebuilds those components. Your configs and shell.json are not "
-            "touched.",
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("ok", "Revert & rebuild")
-        dialog.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        def on_response(_d, response: str) -> None:
-            if response != "ok":
-                return
-            self.win.ensure_password(self._start_revert, force=True)
-
-        dialog.connect("response", on_response)
-        dialog.present(self.win)
-
-    def _on_repair_runtime(self, _b: Gtk.Button) -> None:
-        if self.win.state.get("busy"):
-            self.win.toast("A script is already running — wait for it to finish.")
-            return
-        self.win.ensure_password(self._start_repair_runtime, force=True)
-
-    def _start_repair_runtime(self) -> None:
-        manifest = checks.read_manifest()
-        qt = manifest.get("QT_PREFIX") or "/opt/qt611/6.11.2/gcc_64"
-        rpath = f"{qt}/lib:$ORIGIN:$ORIGIN/../lib"
-        qs = os.path.realpath(str(paths.QS_BIN))
-        tmp = os.path.join(os.path.dirname(qs), ".quickshell.rpath-new")
-        # The shell runs qs, so the file is "Text file busy" for in-place edits.
-        # Stage a patched copy and atomically rename it over the target instead;
-        # the running shell keeps its old inode until the service restarts.
-        script = (
-            "set -e\n"
-            f"QS={shlex.quote(qs)}\n"
-            f"TMP={shlex.quote(tmp)}\n"
-            f"RPATH={shlex.quote(rpath)}\n"
-            'echo "==> staging a patched copy of quickshell"\n'
-            'sudo cp -f "$QS" "$TMP"\n'
-            'sudo patchelf --force-rpath --set-rpath "$RPATH" "$TMP"\n'
-            'sudo chmod 755 "$TMP"\n'
-            'sudo mv -f "$TMP" "$QS"\n'
-            'echo "==> rpath now: $(patchelf --print-rpath "$QS")"\n'
-            'env -u LD_LIBRARY_PATH "$QS" --version\n'
-            'echo "==> restarting caelestia-shell"\n'
-            'systemctl --user try-restart caelestia-shell.service 2>/dev/null || true\n'
-        )
-        self.panel.start(
-            ["bash", "-c", script], title="repair quickshell runtime",
-            password=self.win.state.get("password"),
-            done_note="Quickshell runtime repaired.",
-            on_finished=self._repair_finished,
-        )
-
-    def _repair_finished(self, code: int) -> None:
-        self._refresh_advanced()
-        if code == 0 and not self._runtime_broken():
-            self.win.toast("Quickshell runtime repaired.")
-        else:
-            self.win.toast("Repair did not fix the runtime — see the log.")
-
-    def _start_revert(self) -> None:
-        if not pins.restore_previous():
-            self.win.toast("Nothing to revert to, or revisions.conf is not writable.")
-            self._refresh_advanced()
-            return
-        try:
-            argv = ["bash", paths.script("update.sh"), "--yes"]
-        except FileNotFoundError as exc:
-            self.win.toast(f"Cannot find update.sh: {exc}")
-            return
-        self.panel.start(
-            argv, title="update.sh (revert)", password=self.win.state.get("password"),
-            done_note="Reverted to the previous pins.",
-            on_finished=self._revert_finished,
-        )
-
-    def _revert_finished(self, code: int) -> None:
-        self._refresh_advanced()
-        self.refresh_async(force=True)
-        self.win.toast("Reverted and rebuilt." if code == 0
-                       else "Revert rebuild failed — see the log.")
-
     def _apply_finished(self, _code: int) -> None:
-        self._refresh_advanced()
         self.refresh_async(force=True)

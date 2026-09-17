@@ -15,7 +15,14 @@ from pathlib import Path
 
 APP_ID = "io.github.CaelestiaUbuntu.Installer"
 APP_NAME = "Caelestia for Ubuntu"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
+
+# Brand mark shown in the middle of the dock. This is a trimmed, 96px copy of
+# assets/logo.png kept *inside the package* so it ships with the app: install.sh
+# copies caelestia_installer/ (plus the scripts/configs) but not assets/, so
+# reading the repository original would leave an installed app without a logo.
+# Only the source file's alpha is used - the dock tints it like a symbolic icon.
+BRAND_LOGO = Path(__file__).resolve().parent / "data" / "logo.png"
 
 _INSTALLED_REPO_CANDIDATES = (
     Path("/usr/local/share/caelestia-installer/repo"),

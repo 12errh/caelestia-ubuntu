@@ -167,7 +167,10 @@ class ScriptRunner:
                         self.write_line(self.password)
                     tail = ""  # consumed; a later prompt re-triggers
         finally:
-            rc = 1 if self._cancelled else (self.proc.wait() if self.proc else 1)
+            # Even after cancellation, wait for the script to exit before UI
+            # completion callbacks restore files that it could still be writing.
+            status = self.proc.wait() if self.proc else 1
+            rc = 1 if self._cancelled else status
             self._safe(self.on_end, rc)
 
     def _safe(self, cb: Callable, arg) -> None:

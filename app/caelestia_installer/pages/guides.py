@@ -14,6 +14,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
+from ..page_style import build_page  # noqa: E402
 from ..ui import bullet_list, make_label  # noqa: E402
 
 GUIDES = [
@@ -117,7 +118,7 @@ GUIDES = [
         "icon": "view-refresh-symbolic",
         "sections": [
             ("Keep it current", [
-                "This app: **Setup tab → Check for updates** (runs `update.sh --yes`).",
+                "This app: **Updates tab → Recheck now**, then **Apply updates**.",
                 "Terminal: `./update.sh` — check + apply, `./update.sh --check` "
                 "for a read-only report.",
                 "System packages (Hyprland, drivers) update normally with apt.",
@@ -143,8 +144,8 @@ GUIDES = [
             ]),
             ("Lock screen issues after lid resume", [
                 "The sleep hooks re-acquire the lock automatically. If a "
-                "frozen screen persists, re-run the installer once (Repair "
-                "button) — it re-deploys the hooks with your user id.",
+                "frozen screen persists, re-run the installer once (Install "
+                "tab) — it re-deploys the hooks with your user id.",
             ]),
             ("hyprctl configerrors looks wrong", [
                 "Run `hyprctl reload` to pick up edited configs.",
@@ -153,7 +154,7 @@ GUIDES = [
                 "`sudo apt install qalculate` (the CLI, not just the library).",
             ]),
             ("Uninstall / start over", [
-                "Setup tab → Uninstall. Configs are archived to "
+                "Advanced tab → Remove Caelestia. Configs are archived to "
                 "`~/.config/caelestia-ubuntu-uninstalled-<date>`.",
                 "GNOME was never modified — removing this returns the system "
                 "to stock.",
@@ -168,29 +169,16 @@ class GuidesPage(Adw.Bin):
         super().__init__()
         self.win = win
 
-        sc = Gtk.ScrolledWindow.new()
-        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sc.set_vexpand(True)
-        clamp = Adw.Clamp.new()
-        clamp.set_maximum_size(780)
-        box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 12)
-        box.set_margin_top(18)
-        box.set_margin_bottom(24)
-        box.set_margin_start(18)
-        box.set_margin_end(18)
-        clamp.set_child(box)
-        sc.set_child(clamp)
-        self.set_child(sc)
-
-        intro = make_label(
-            "<big><b>Caelestia user guide</b></big>\n"
-            "Everything below reflects the exact setup this app installs.")
-        box.append(intro)
+        box = build_page(self, "GUIDES  /  FIND YOUR WAY",
+                         "A familiar place to begin.",
+                         "First login, everyday shortcuts and help when something feels off. "
+                         "Choose a topic to explore.")
 
         for g in GUIDES:
             exp = Adw.ExpanderRow.new()
             exp.set_title(g["title"])
-            exp.set_subtitle("open for details")
+            exp.set_subtitle(f"{len(g["sections"])} short sections")
+            exp.add_prefix(Gtk.Image.new_from_icon_name(g["icon"]))
             for section_title, items in g["sections"]:
                 row = Adw.PreferencesRow.new()
                 row.set_activatable(False)
@@ -204,4 +192,7 @@ class GuidesPage(Adw.Bin):
                 inner.append(bullet_list(items))
                 row.set_child(inner)
                 exp.add_row(row)
-            box.append(exp)
+            group = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+            group.add_css_class("boxed-list")
+            group.append(exp)
+            box.append(group)
