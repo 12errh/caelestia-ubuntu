@@ -40,6 +40,10 @@ mkdir -p "$STAGE/DEBIAN" \
 
 # --- payload ---------------------------------------------------------------
 install -m 0755 "$here/deb/caelestia-installer" "$STAGE/usr/bin/caelestia-installer"
+# Also shipped so postinst (and the user, later) can remove a legacy
+# `app/install.sh` install whose /usr/local copy would shadow this package.
+install -m 0755 "$here/deb/caelestia-legacy-cleanup.sh" \
+    "$STAGE/usr/share/caelestia-installer/caelestia-legacy-cleanup.sh"
 
 cp -a "$repo/app/caelestia_installer" "$STAGE/usr/share/caelestia-installer/app/"
 cp -a "$repo/app/run.py"             "$STAGE/usr/share/caelestia-installer/app/"
@@ -53,6 +57,10 @@ cp -a "$repo/setup.sh" "$repo/update.sh" "$repo/uninstall.sh" \
 cp -a "$repo/configs" "$STAGE/usr/share/caelestia-installer/repo/"
 
 install -m 0644 "$repo/app/data/io.github.CaelestiaUbuntu.Installer.desktop" \
+    "$STAGE/usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop"
+# Point the grid entry at this package's launcher explicitly: `Exec=caelestia-installer`
+# would resolve through $PATH, where a leftover /usr/local/bin copy can win.
+sed -i "s|^Exec=.*|Exec=/usr/bin/caelestia-installer|" \
     "$STAGE/usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop"
 install -m 0644 "$repo/app/data/io.github.CaelestiaUbuntu.Installer.png" \
     "$STAGE/usr/share/icons/hicolor/128x128/apps/io.github.CaelestiaUbuntu.Installer.png"

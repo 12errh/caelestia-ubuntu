@@ -76,6 +76,12 @@ still built from within the app). See
 [docs/INSTALL_APP.md](docs/INSTALL_APP.md) for details and manual build
 options (maintainers).
 
+> Use **one** install method. `/usr/local` and `~/.local` are searched before
+> `/usr`, so adding `sudo ./app/install.sh` on top of the package makes the
+> *older* app and its *older icon* win. Since v1.2.1 the package removes such a
+> leftover automatically and `app/install.sh` refuses to create one — see
+> [Don't mix install methods](docs/INSTALL_APP.md#dont-mix-install-methods).
+
 See [app/README.md](app/README.md) and the
 [complete user guide](docs/USER_GUIDE.md) (also built into the app).
 

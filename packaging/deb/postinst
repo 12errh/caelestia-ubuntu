@@ -1,6 +1,25 @@
 #!/bin/sh
 set -e
 
+CLEANUP="/usr/share/caelestia-installer/caelestia-legacy-cleanup.sh"
+
+# A copy installed by `sudo ./app/install.sh` lives in /usr/local, which is
+# searched before /usr in both $PATH and $XDG_DATA_DIRS. Left in place it wins:
+# `caelestia-installer` launches the older copy and the app grid keeps the
+# older entry and icon. Remove it so the package is what actually runs.
+if [ -x "$CLEANUP" ]; then
+    echo "caelestia-installer: checking for a legacy /usr/local install"
+    "$CLEANUP" || true
+
+    # The same trap exists for a per-user install, which outranks /usr/local.
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        user_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)
+        if [ -n "$user_home" ] && [ -d "$user_home/.local" ]; then
+            "$CLEANUP" --prefix "$user_home/.local" || true
+        fi
+    fi
+fi
+
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications || true
 fi

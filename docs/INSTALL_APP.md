@@ -46,9 +46,14 @@ caelestia-installer
 /usr/bin/caelestia-installer                                   # launcher
 /usr/share/caelestia-installer/app/                            # the Python app
 /usr/share/caelestia-installer/repo/                           # setup/update/uninstall + configs
+/usr/share/caelestia-installer/caelestia-legacy-cleanup.sh     # removes a shadowing copy
 /usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop
 /usr/share/icons/hicolor/128x128/apps/io.github.CaelestiaUbuntu.Installer.png
 ```
+
+`postinst` runs the cleanup script against `/usr/local` (and, when installing
+with `sudo`, the invoking user's `~/.local`). See
+[Don't mix install methods](#dont-mix-install-methods).
 
 On first launch the launcher copies the repo scripts/configs to a
 **user-writable** location:
@@ -79,9 +84,41 @@ Published desktop revisions are checked separately; **Use published pins** and
 **Apply updates** are explicit steps. Existing local pins survive app upgrades.
 
 If running from a clone, update that checkout and restart. For `install.sh`
-installs, update the source and rerun the same installation command. Do not mix
-user-local, `/usr/local`, and `.deb` installs: older launchers/icons can shadow the
-updated package. Versions without this checker need one manual upgrade first.
+installs, update the source and rerun the same installation command.
+
+### Don't mix install methods
+
+Installing **and** then running `sudo ./app/install.sh` looks like an upgrade and
+gets you the opposite: the *older* app, with the *older* icon. `/usr/local` and
+`~/.local` are both searched before `/usr` in `$PATH` and in `$XDG_DATA_DIRS`, so
+the clone install wins over the package no matter which one is newer:
+
+| Symptom | Cause |
+|---|---|
+| `caelestia-installer` starts an older version (check **About**) | `/usr/local/bin/caelestia-installer` shadows `/usr/bin/caelestia-installer` and execs the older copy under `/usr/local/share` |
+| The app grid keeps the old icon | A leftover scalable SVG or `icon-theme.cache` in `/usr/local/share/icons` outranks the packaged 128px PNG |
+| The grid entry launches the old app | `/usr/local/share/applications/….desktop` shadows the packaged entry |
+
+Since **v1.2.1** this cannot happen: `app/install.sh` refuses to run while the
+package is installed, the package's `postinst` removes a shadowing leftover, and
+the packaged desktop entry launches `/usr/bin/caelestia-installer` by absolute
+path instead of relying on `$PATH` order.
+
+To repair a machine that is already in this state (for example one installed
+from a package older than v1.2.1), reinstall the current package or run the
+cleanup directly:
+
+```bash
+sudo /usr/share/caelestia-installer/caelestia-legacy-cleanup.sh
+# nothing to clean? it says so and exits 0. Preview what it found first:
+sudo /usr/share/caelestia-installer/caelestia-legacy-cleanup.sh --help
+```
+
+It removes only files it positively identifies as this project's — the
+`install.sh` launcher, its payload directory, its desktop entry, and its icons —
+and refreshes the desktop/icon caches afterwards. A hand-written launcher or an
+unrelated `/usr/local` file is left alone. Restart the shell session (log out and
+back in, or restart the desktop) to clear the icon the running shell has cached.
 
 ### Uninstall
 
@@ -109,6 +146,15 @@ sudo ./app/install.sh        # system-wide (/usr/local), appears in the app grid
 
 This copies the app and repo to `/usr/local/share/caelestia-installer`
 (or `~/.local/share/...`) and installs a `caelestia-installer` launcher.
+
+It refuses to run while the `.deb` is installed, because mixing the two makes
+the older copy win (see [Don't mix install
+methods](#dont-mix-install-methods)). Remove the package first:
+
+```bash
+sudo apt remove caelestia-installer
+sudo ./app/install.sh
+```
 
 ## Building the package (maintainers)
 

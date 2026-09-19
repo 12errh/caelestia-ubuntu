@@ -55,6 +55,37 @@ jobs:
           dpkg-deb --info dist/*.deb
           dpkg-deb -c dist/*.deb | awk '{print $6}' | sed -n '1,12p'
 
+      - name: Verify package layout
+        # Guards the shadowing fix. The package must carry the legacy-cleanup
+        # helper, run it from postinst, point the grid entry at an absolute
+        # /usr/bin path (bare `caelestia-installer` resolves through $PATH,
+        # where a leftover /usr/local copy wins), and ship only the 128px PNG.
+        run: |
+          set -e
+          deb=$(echo dist/*.deb)
+          contents=$(dpkg-deb -c "$deb" | awk '{print $6}')
+          for path in \
+            ./usr/bin/caelestia-installer \
+            ./usr/share/caelestia-installer/caelestia-legacy-cleanup.sh \
+            ./usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop \
+            ./usr/share/icons/hicolor/128x128/apps/io.github.CaelestiaUbuntu.Installer.png; do
+            echo "$contents" | grep -qx "$path" || { echo "missing from package: $path" >&2; exit 1; }
+          done
+          if echo "$contents" | grep -q 'scalable/apps/io.github.CaelestiaUbuntu.Installer'; then
+            echo "package ships a scalable icon, which outranks the PNG" >&2
+            exit 1
+          fi
+          extract=$(mktemp -d)
+          dpkg-deb -x "$deb" "$extract"
+          dpkg-deb -e "$deb" "$extract/DEBIAN"
+          grep -q '^Exec=/usr/bin/caelestia-installer$' \
+            "$extract/usr/share/applications/io.github.CaelestiaUbuntu.Installer.desktop"
+          grep -q 'caelestia-legacy-cleanup.sh' "$extract/DEBIAN/postinst"
+          # It ships as root-run code, so make sure it at least parses and
+          # exits cleanly on a prefix with nothing to clean.
+          "$extract/usr/share/caelestia-installer/caelestia-legacy-cleanup.sh" \
+            --prefix "$(mktemp -d)" --quiet
+
       - name: Checksums
         run: |
           cd dist

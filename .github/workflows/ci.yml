@@ -38,7 +38,8 @@ jobs:
           shellcheck -S error setup.sh uninstall.sh update.sh \
             scripts/ci-verify-install.sh app/install.sh \
             packaging/build-deb.sh packaging/deb/caelestia-installer \
-            packaging/deb/postinst packaging/deb/postrm
+            packaging/deb/postinst packaging/deb/postrm \
+            packaging/deb/caelestia-legacy-cleanup.sh
 
   # --------------------------------------------------------------------------
   # Heavy, real-system test. The runner's `/` is too small for the full build,
