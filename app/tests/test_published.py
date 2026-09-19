@@ -97,7 +97,6 @@ def test_recheck_also_checks_published_when_not_installed():
     Adw.init()
     page = UpdatesPage(Mock(state={"busy": False}))
     with patch.object(page, "_check_published_async") as check, \
-            patch.object(page, "_check_app_async"), \
             patch("caelestia_installer.pages.updates.checks.installed_state",
                   return_value={"installed": False}):
         page.refresh_async(force=True)

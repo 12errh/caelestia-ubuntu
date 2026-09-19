@@ -67,6 +67,19 @@ GUIDES = [
                 "**Super+Shift+A** — the whole screen",
                 "Saved into `~/Pictures/Screenshots` via hyprshot.",
             ]),
+            ("Change or add shortcuts", [
+                "The app's **Keybinds tab** lists every shortcut, including the "
+                "ones Hyprland pulls in from a sourced file such as "
+                "`~/.config/hypr/keybinds.conf`.",
+                "Pick a shortcut to change its keys or what it does, or use "
+                "**Add a keybinding** and simply press the combination — it is "
+                "captured for you and checked against every existing binding "
+                "before it can be saved.",
+                "For the action, launch any installed app from a searchable "
+                "list, run your own command, or choose a ready-made desktop "
+                "action. Every change is backed up, and **Undo last change** "
+                "puts the previous file back.",
+            ]),
         ],
     },
     {

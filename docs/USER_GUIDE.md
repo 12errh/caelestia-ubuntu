@@ -92,6 +92,21 @@ These are the ones shipped in `configs/hypr/hyprland.conf`.
 
 Saved to `~/Pictures/Screenshots`.
 
+### Change or add shortcuts
+
+The app's **Keybinds tab** lists every shortcut above — including any the
+config pulls in with `source =` (for example `~/.config/hypr/keybinds.conf`) —
+grouped by section.
+
+- Pick a shortcut to change its keys or what it does, or remove it.
+- **Add a keybinding**: press the combination and it is captured for you. It
+  is checked against every existing binding first, so the same keys can never
+  be assigned twice without you seeing which shortcut already owns them.
+- For the action, launch any installed app from a searchable list, run your own
+  command, or choose a ready-made desktop action.
+- Every change is validated, written atomically and backed up;
+  **Undo last change** restores the previous file. Nothing here needs sudo.
+
 ---
 
 ## 4. Wallpaper & looks

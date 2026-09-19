@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from caelestia_installer.main import MainWindow, PAGE_META
 from caelestia_installer.pages.install import InstallPage
+from caelestia_installer.pages.keybinds import KeybindsPage
 from caelestia_installer.pages.setup import SetupPage
 from caelestia_installer.pages.updates import UpdatesPage
 from caelestia_installer.pages.advanced import AdvancedPage
@@ -34,13 +35,18 @@ class NavigationTests(unittest.TestCase):
         # No network, subprocesses, writes or installation from these tests.
         for target, method in ((InstallPage, "refresh_checks_async"),
                                (SetupPage, "on_navigate_to"),
+                               (KeybindsPage, "on_navigate_to"),
                                (UpdatesPage, "refresh_async"),
                                (AdvancedPage, "_refresh_advanced")):
             patcher = patch.object(target, method)
             patcher.start()
             self.addCleanup(patcher.stop)
         state = patch("caelestia_installer.main.checks.installed_state",
-                      return_value={"installed": False})
+                      return_value={
+                          "installed": False, "manifest": {}, "qs": False,
+                          "qt_version": "", "shell_dir": False, "shell_json": False,
+                          "session_registered": False, "wallpaper": None,
+                      })
         state.start()
         self.addCleanup(state.stop)
         self.settings = Gtk.Settings.get_default()
@@ -78,6 +84,49 @@ class NavigationTests(unittest.TestCase):
                    and self.win.stack.get_visible_child_name() == name)
         self.win.dock._prev_t = time.monotonic()
         self.assertFalse(self.win.dock._tick())
+        self.assertEqual(self.errors, [])
+
+    def test_about_page_summary_updates_and_dock_centring(self):
+        # Eight tabs: four icons, the brand mark, then four more. The split is
+        # even, so the mark is centred by construction and there is no spacer
+        # padding anywhere in the bar.
+        from gi.repository import Gtk
+
+        children = list(self.win.dock)
+        buttons = [c for c in children if hasattr(c, "page_id")]
+        boxes = {i: c for i, c in enumerate(children) if isinstance(c, Gtk.Box)}
+        brand = [i for i, c in boxes.items() if c.get_first_child() is not None]
+        spacers = [i for i, c in boxes.items() if c.get_first_child() is None]
+        self.assertEqual(len(buttons), 8)
+        self.assertEqual(brand, [len(buttons) // 2])
+        self.assertEqual(spacers, [])
+        self.assertEqual([b.page_id for b in buttons[:4]],
+                         ["welcome", "install", "setup", "keybinds"])
+        self.assertEqual([b.page_id for b in buttons[4:]],
+                         ["updates", "guides", "advanced", "about"])
+
+        self.win.select_page("about")
+        settle(lambda: self.win.transition._phase == "idle"
+               and self.win.stack.get_visible_child_name() == "about")
+        buf = self.win.page_about.summary.get_buffer()
+        settle(lambda: buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
+                                    False).startswith("Caelestia for Ubuntu installer:")
+               and not self.win.page_about._loading)
+        self.assertEqual(self.errors, [])
+
+    def test_about_update_check_reports_newer_release(self):
+        from caelestia_installer.releases import Release
+
+        self.win.select_page("about")
+        settle(lambda: self.win.transition._phase == "idle"
+               and self.win.stack.get_visible_child_name() == "about")
+        page = self.win.page_about
+        with patch("caelestia_installer.pages.about.releases.fetch_latest",
+                   return_value=Release("9.9.9")):
+            page.btn_check.emit("clicked")
+            settle(lambda: "9.9.9" in page.row_updates.get_subtitle()
+                   and not page._checking)
+        self.assertTrue(page.btn_check.get_sensitive())
         self.assertEqual(self.errors, [])
 
     def test_build_confirmation_runs_without_blocking_navigation(self):

@@ -15,7 +15,7 @@ from pathlib import Path
 
 APP_ID = "io.github.CaelestiaUbuntu.Installer"
 APP_NAME = "Caelestia for Ubuntu"
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 # Brand mark shown in the middle of the dock. This is a trimmed, 96px copy of
 # assets/logo.png kept *inside the package* so it ships with the app: install.sh
@@ -95,6 +95,8 @@ MANIFEST = Path.home() / ".local/share/caelestia-ubuntu/manifest"
 QS_BIN = Path("/usr/local/bin/qs")
 SHELL_DIR = Path.home() / ".config/quickshell/caelestia"
 SHELL_JSON = Path.home() / ".config/caelestia/shell.json"
+HYPR_DIR = Path.home() / ".config/hypr"
+HYPRLAND_CONF = HYPR_DIR / "hyprland.conf"  # where the shell's keybinds live
 HYPR_SESSION = Path("/usr/share/wayland-sessions/hyprland.desktop")
 SHELL_SERVICE = "caelestia-shell.service"
 WALLPAPER_STATE = Path.home() / ".local/state/caelestia/wallpaper"

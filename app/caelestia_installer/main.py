@@ -25,8 +25,10 @@ from .motion import PageTransition  # noqa: E402
 from .dock import FloatingDock  # noqa: E402
 from . import glass  # noqa: E402
 from .pages.advanced import AdvancedPage  # noqa: E402
+from .pages.about import AboutPage  # noqa: E402
 from .pages.guides import GuidesPage  # noqa: E402
 from .pages.install import InstallPage  # noqa: E402
+from .pages.keybinds import KeybindsPage  # noqa: E402
 from .pages.setup import SetupPage  # noqa: E402
 from .pages.updates import UpdatesPage  # noqa: E402
 from .pages.welcome import WelcomePage  # noqa: E402
@@ -38,9 +40,11 @@ PAGE_META: dict[str, tuple[str, str, str]] = {
     "welcome":  ("Welcome",  "Welcome",  "Install, set up and learn Caelestia"),
     "install":  ("Install",  "Install",  "System checks, options and live progress"),
     "setup":    ("Setup",    "Setup",    "Wallpaper, appearance and idle settings"),
+    "keybinds": ("Keybinds", "Keybinds", "See, add and edit every shortcut"),
     "updates":  ("Updates",  "Updates",  "Check installed revisions and apply updates"),
     "guides":   ("Guides",   "Guides",   "First login, keybinds and troubleshooting"),
     "advanced": ("Advanced", "Advanced", "Installation overrides, experimental builds and recovery"),
+    "about":    ("About",    "About",    "App version, updates and issue reporting"),
 }
 
 # Dock icons, chosen so each glyph *says* what its tab does at the 20px idle
@@ -57,9 +61,11 @@ DOCK_ICONS = {
     "welcome":  "go-home-symbolic",                 # house  -> the landing tab
     "install":  "folder-download-symbolic",         # arrow into tray -> install the stack
     "setup":    "preferences-system-symbolic",      # cog    -> appearance / settings
+    "keybinds": "input-keyboard-symbolic",          # keyboard -> the shortcut manager
     "updates":  "update-symbolic",                  # crisp circular arrows -> check & apply
     "guides":   "accessories-dictionary-symbolic",  # open book -> the built-in manual
     "advanced": "utilities-terminal-symbolic",      # $ prompt -> run repo scripts directly
+    "about":    "help-about-symbolic",              # info badge -> version & feedback
 }
 
 
@@ -105,10 +111,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Floating dock (overlaid at the bottom centre) — wrapped in Liquid Glass.
         self.dock = FloatingDock(on_select=self.select_page)
+        # Brand mark in the middle gap. There are eight tabs, so the two halves
+        # hold four icons each and no padding is needed: the mark sits dead
+        # centre with the bar perfectly balanced around it.
         half = len(PAGE_META) // 2
         for i, (row_id, (_label, _title, _sub)) in enumerate(PAGE_META.items()):
             self.dock.add_item(row_id, DOCK_ICONS[row_id], _title)
-            # Brand mark, dead centre: the same number of tabs either side of it.
             if i + 1 == half:
                 self.dock.add_brand(paths.BRAND_LOGO, paths.APP_NAME)
 
@@ -134,17 +142,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.page_welcome  = WelcomePage(self)
         self.page_install  = InstallPage(self)
         self.page_setup    = SetupPage(self)
+        self.page_keybinds = KeybindsPage(self)
         self.page_updates  = UpdatesPage(self)
         self.page_guides   = GuidesPage(self)
         self.page_advanced = AdvancedPage(self)
+        self.page_about = AboutPage(self)
 
         self.pages = {
             "welcome":  self.page_welcome,
             "install":  self.page_install,
             "setup":    self.page_setup,
+            "keybinds": self.page_keybinds,
             "updates":  self.page_updates,
             "guides":   self.page_guides,
             "advanced": self.page_advanced,
+            "about":    self.page_about,
         }
         for row_id, page in self.pages.items():
             self.stack.add_named(page, row_id)

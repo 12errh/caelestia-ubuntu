@@ -56,6 +56,7 @@ in [docs/INSTALL_APP.md](../docs/INSTALL_APP.md).
 | **Welcome** | Status snapshot (installed or not, service running?) and quick entry points. |
 | **Install** | Four-step wizard: system checks → install options → sudo password → live progress and result. Runs `setup.sh` with your chosen flags. Expert overrides live in Advanced. |
 | **Setup** | Status, a paginated wallpaper gallery with background thumbnail loading, appearance controls and idle/lock settings. |
+| **Keybinds** | Every Hyprland shortcut, read from `hyprland.conf` **and any file it sources** (e.g. `keybinds.conf`), grouped by section. Add one by pressing the keys (captured automatically, conflicts checked before it can be saved), then pick the action — launch an installed app from a searchable list, run a command, or a ready-made desktop action. Edits are validated, written atomically and backed up; **Undo last change** restores the previous file. |
 | **Updates** | Read-only revision checks and normal updates to the project's pinned commits, with a live build log. Experimental builds and recovery live exclusively in Advanced. |
 | **Guides** | Expandable topics covering first login, keybinds, wallpaper, idle/lock behaviour, updating and troubleshooting. |
 | **Advanced** | Installation overrides (Qt version and disk-check override), shell configuration editor and restart, latest-upstream builds, Keep/Revert, runtime repair and confirmed uninstall options. Pin snapshots live in `~/.local/share/caelestia-ubuntu/pins`. |
@@ -64,18 +65,18 @@ in [docs/INSTALL_APP.md](../docs/INSTALL_APP.md).
 
 These are two separate updates:
 
-- **Installer app:** Updates checks GitHub's latest stable release on its first
-  visit each app session, and again with **Recheck now**. A newer `vMAJOR.MINOR.PATCH`
-  release with an uploaded `.deb` enables **Get app update**. After confirmation,
-  it opens the official release page; download the package, finish any running
-  build, close the app, install the `.deb`, and relaunch. This is notification
-  and manual installation, **not silent self-updating**. Offline errors do not
-  prevent desktop update checks. No package is downloaded or executed by the app.
-  The tag workflow attaches the package and `SHA256SUMS`; installing the package
-  upgrades the app without rebuilding desktop components. Clone / `install.sh`
-  users should update using their original method to avoid shadowing installs.
-  Native `apt upgrade` delivery would require a signed APT repository, which is
-  not configured.
+- **Installer app:** the **About** tab shows the installed version and checks
+  GitHub's latest stable release on its first visit each app session, and again
+  with **Check for updates**. A newer `vMAJOR.MINOR.PATCH` release with an
+  uploaded `.deb` opens the official release page after confirmation; download
+  the package, finish any running build, close the app, install the `.deb`, and
+  relaunch. This is notification and manual installation, **not silent
+  self-updating**. Offline errors do not prevent desktop update checks. No
+  package is downloaded or executed by the app. The tag workflow attaches the
+  package and `SHA256SUMS`; installing the package upgrades the app without
+  rebuilding desktop components. Clone / `install.sh` users should update using
+  their original method to avoid shadowing installs. Native `apt upgrade`
+  delivery would require a signed APT repository, which is not configured.
 - **Tested desktop pins:** Updates now also fetches `revisions.conf` from this
   project's GitHub `main` branch in the background. Commit and push your tested
   revisions there to publish them; no app release tag is needed. The check is
@@ -130,22 +131,32 @@ app/
     ├── runner.py              # PTY script runner with sudo auto-answer
     ├── paths.py               # repo/script/config path resolution
     ├── releases.py            # stable app-release detection
+    ├── diagnostics.py         # local diagnostic summary + pre-filled issue URL
     ├── published.py           # read-only published desktop-pin checks
+    ├── keybinds.py            # parse/edit/safely write Hyprland keybinds
     ├── ui.py                  # shared GTK helpers
     └── pages/
         ├── welcome.py         # status + entry points
         ├── install.py         # gated install wizard
         ├── setup.py           # paginated wallpaper gallery + desktop settings
+        ├── keybinds.py        # shortcut list, press-to-capture editor, app picker
         ├── updates.py         # app releases, published pins + component updates
         ├── guides.py          # built-in user guide content
         ├── advanced.py        # expert controls + recovery tools
         ├── advanced_actions.py # confirmed maintenance actions
+        ├── about.py           # app version, update check + issue reporter
         └── script_panel.py    # shared live-log/progress widget
 ```
 
 ## Development notes
 
 - No third-party Python packages — stdlib + PyGObject only.
+- Keybindings are edited in place: `keybinds.py` reads the user's
+  `~/.config/hypr/hyprland.conf` plus every file it `source`-includes, and
+  writes back to the file each binding came from (new ones join a sourced
+  `keybinds.conf` when the config has one). Nothing there uses sudo, every
+  value is rejected if it contains a newline/NUL/`#`, and each write is atomic
+  with a `.bak` of the previous file.
 - `paths.repo_root()` finds the repo when running from a clone, from the
   installed layout (`/usr/local/share/caelestia-installer/repo`), or via
   the `CAEL_REPO_DIR` environment variable (what `install.sh`'s launcher

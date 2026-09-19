@@ -37,9 +37,15 @@ wraps every script:
 - **Setup screen** — paginated wallpaper previews loaded in the background,
   appearance controls (transparency, rounding, animation speed, font scale),
   and idle/lock timers.
-- **Updates screen** — app release notifications, published maintainer-tested
-  revision checks, and desktop updates to accepted pins with a live log.
-  App updates open the release download page; installation is manual.
+- **Keybindings screen** — every Hyprland shortcut from `hyprland.conf` and the
+  files it sources, grouped by section. Add one by pressing the keys (grabbed
+  automatically, checked against the existing bindings first), then choose what
+  it does: launch an installed app from a searchable list, run a command, or a
+  ready-made desktop action. Edits are validated, written atomically and
+  backed up, with a one-click undo.
+- **Updates screen** — published maintainer-tested revision checks and desktop
+  updates to accepted pins with a live log. The installed version and app
+  updates live in the About screen; installation is manual.
 - **Advanced tab** — install overrides, shell editor/restart, experimental
   upstream builds, Keep/Revert, runtime repair, and confirmed uninstall.
   Cancelling an upstream build restores pre-build pins, not installed binaries.

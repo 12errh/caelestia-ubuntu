@@ -77,55 +77,16 @@ def wait_for(predicate):
     raise AssertionError("App check did not finish")
 
 
-def test_async_check_button_busy_and_offline():
-    Adw.init()
-    win = Mock(state={"busy": False})
-    page = UpdatesPage(win)
-    with patch.object(releases, "fetch_latest", return_value=releases.Release("99.0.0")):
-        page._check_app_async()
-        wait_for(lambda: not page._app_checking)
-    assert page.btn_app_update.get_sensitive()
-    assert "99.0.0" in page.app_row.get_subtitle()
-    win.state["busy"] = True
-    page._refresh_apply_button()
-    assert not page.btn_app_update.get_sensitive()
-    win.state["busy"] = False
-    with patch.object(releases, "fetch_latest", side_effect=OSError("offline")):
-        page._check_app_async()
-        wait_for(lambda: not page._app_checking)
-    assert "offline" in page.app_row.get_subtitle()
-    assert page._app_release is None
-    assert not page.btn_app_update.get_sensitive()
-    with patch.object(releases, "fetch_latest", return_value=releases.Release(paths.VERSION)):
-        page._check_app_async()
-        wait_for(lambda: not page._app_checking)
-    assert "No newer" in page.app_row.get_subtitle()
-    assert not page.btn_app_update.get_sensitive()
+def test_newer_release_detection():
+    release = releases.Release("99.0.0")
+    assert release.newer_than(paths.VERSION)
+    assert not releases.Release(paths.VERSION).newer_than(paths.VERSION)
 
 
-def test_release_link_requires_confirmation():
+def test_recheck_checks_published_even_without_desktop():
     Adw.init()
     page = UpdatesPage(Mock(state={"busy": False}))
-    page._app_result(releases.Release("99.0.0"), "")
-    dialog = Mock()
-    with patch("caelestia_installer.pages.updates.Adw.AlertDialog.new",
-               return_value=dialog), \
-            patch("caelestia_installer.pages.updates.Gtk.UriLauncher.new") as launcher:
-        page.btn_app_update.emit("clicked")
-        callback = dialog.connect.call_args.args[1]
-        launcher.assert_not_called()
-        callback(dialog, "cancel")
-        launcher.assert_not_called()
-        callback(dialog, "open")
-        launcher.assert_called_once_with(releases.Release("99.0.0").url)
-        launcher.return_value.launch.assert_called_once()
-
-
-def test_recheck_checks_app_even_without_desktop():
-    Adw.init()
-    page = UpdatesPage(Mock(state={"busy": False}))
-    with patch.object(page, "_check_app_async") as check, \
-            patch.object(page, "_check_published_async"), \
+    with patch.object(page, "_check_published_async") as check, \
             patch("caelestia_installer.pages.updates.checks.installed_state",
                   return_value={"installed": False}):
         page.refresh_async(force=True)

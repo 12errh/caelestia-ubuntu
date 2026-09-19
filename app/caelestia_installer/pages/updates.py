@@ -18,7 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from .. import checks, paths, pins, published, releases  # noqa: E402
+from .. import checks, paths, pins, published  # noqa: E402
 from ..runner import run_capture, strip_ansi  # noqa: E402
 from ..page_style import build_page  # noqa: E402
 from .script_panel import ScriptPanel  # noqa: E402
@@ -113,22 +113,6 @@ class UpdatesPage(Adw.Bin):
                          "Keep the good things current.",
                          "Update to the project's pinned revisions. Newer upstream builds "
                          "are optional and live in Advanced.")
-
-        self._app_checking = False
-        self._app_release = None
-        app_group = Adw.PreferencesGroup(
-            title="Installer app", description="App releases are separate from desktop builds.")
-        app_group.add_css_class("page-panel")
-        self.app_row = Adw.ActionRow(
-            title=f"Caelestia for Ubuntu · {paths.VERSION}",
-            subtitle="Not checked yet", use_markup=False)
-        self.app_row.set_subtitle_lines(0)
-        self.btn_app_update = Gtk.Button(label="Get app update", valign=Gtk.Align.CENTER)
-        self.btn_app_update.set_sensitive(False)
-        self.btn_app_update.connect("clicked", self._on_app_update)
-        self.app_row.add_suffix(self.btn_app_update)
-        app_group.add(self.app_row)
-        box.append(app_group)
 
         published_group = Adw.PreferencesGroup(title="Maintainer-tested revisions")
         self.published_row = Adw.ActionRow(
@@ -255,80 +239,11 @@ class UpdatesPage(Adw.Bin):
         """Apply is only actionable when a checked report found updates."""
         idle = (not self._checking and not self._published_checking
                 and not self.win.state.get("busy"))
-        self.btn_app_update.set_sensitive(
-            self._app_release is not None and not self._app_checking
-            and not self.win.state.get("busy"))
         self.btn_adopt.set_sensitive(bool(self._published_pins) and idle)
         enabled = self._has_updates and idle
         self.btn_apply.set_sensitive(enabled)
         self.btn_apply.set_tooltip_text(
             None if enabled else "No updates available — run a check first.")
-
-    def _check_app_async(self) -> None:
-        if self._app_checking:
-            return
-        self._app_checking = True
-        self._app_release = None
-        self.btn_app_update.set_sensitive(False)
-        self.app_row.set_subtitle("Checking stable GitHub releases…")
-
-        def worker():
-            try:
-                release = releases.fetch_latest()
-                if release is not None:
-                    release.newer_than(paths.VERSION)
-            except (OSError, ValueError) as exc:
-                GLib.idle_add(self._app_result, None, str(exc))
-            else:
-                GLib.idle_add(self._app_result, release, "")
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _app_result(self, release, error) -> bool:
-        self._app_checking = False
-        if error:
-            self.app_row.set_subtitle(f"App update check unavailable: {error}")
-        elif release is None:
-            self.app_row.set_subtitle("No stable app release has been published yet.")
-        elif release.newer_than(paths.VERSION):
-            self._app_release = release
-            self.app_row.set_subtitle(
-                f"Version {release.version} is available. Download and install the .deb, "
-                "then restart the app. Desktop components are not rebuilt.")
-        else:
-            self.app_row.set_subtitle(
-                f"No newer stable app release (latest: {release.version}).")
-        self._refresh_apply_button()
-        return False
-
-    def _on_app_update(self, _button) -> None:
-        if self._app_release is None or self.win.state.get("busy"):
-            return
-        url = self._app_release.url
-        dialog = Adw.AlertDialog.new(
-            "Update the installer app?",
-            "Open the official release page and download its .deb. Wait for any desktop "
-            "build to finish, close this app, then open the package in your software "
-            "installer or install it with sudo apt install /absolute/path/to/package.deb. "
-            "Restart the app afterward. If you installed from a clone or install.sh, "
-            "update using that same method instead to avoid duplicate installations.")
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("open", "Open release page")
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        def response(_dialog, choice):
-            if choice != "open" or self.win.state.get("busy"):
-                return
-            launcher = Gtk.UriLauncher.new(url)
-            launcher.launch(self.win, None, self._app_release_opened)
-        dialog.connect("response", response)
-        dialog.present(self.win)
-
-    def _app_release_opened(self, launcher, result) -> None:
-        try:
-            launcher.launch_finish(result)
-        except GLib.Error as exc:
-            self.win.toast(f"Could not open the release page: {exc.message}")
 
     def _check_published_async(self) -> None:
         self._published_checking = True
@@ -411,7 +326,6 @@ class UpdatesPage(Adw.Bin):
         if self._checked_once and not force:
             return
         self._checked_once = True
-        self._check_app_async()
         self._check_published_async()
         state = checks.installed_state()
         if not state["installed"]:

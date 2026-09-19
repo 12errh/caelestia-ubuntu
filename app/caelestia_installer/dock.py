@@ -42,6 +42,10 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
 
+# NOTE: do not add size-negotiation padding to the bar. With eight tabs the
+# two halves hold four icons each, so the brand mark is centred by construction
+# and any spacer would only push the bar off-centre.
+
 # ---------------------------------------------------------------------------
 # Constants -- every value below is the Aceternity component's, converted from
 # Tailwind px. Nothing here is arbitrary; change only with intent.
@@ -430,8 +434,10 @@ class FloatingDock(Gtk.Box):
         """Place the brand mark (logo between two hairline rules) in the dock.
 
         Call this while building the dock, at the position the mark should sit --
-        main.py calls it between the two halves of the navigation items to put
-        the brand in the middle of the bar.
+        main.py calls it after the first half of the navigation items to put the
+        brand in the middle of the bar. The tab count is even, so both halves
+        hold the same number of icons and the mark lands dead centre with no
+        spacer padding.
 
         The mark is deliberately *not* a dock item: it never magnifies, never
         responds to hover, and stays out of the magnification maths, so the bar
