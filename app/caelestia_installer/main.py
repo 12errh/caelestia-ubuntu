@@ -18,11 +18,11 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from . import VERSION, checks, paths  # noqa: E402
 from .motion import PageTransition  # noqa: E402
-from .dock import FloatingDock  # noqa: E402
+from .dock import BAR_HEIGHT, BAR_PAD_BOTTOM, FloatingDock, MAX_DISC  # noqa: E402
 from . import glass  # noqa: E402
 from .pages.advanced import AdvancedPage  # noqa: E402
 from .pages.about import AboutPage  # noqa: E402
@@ -68,6 +68,47 @@ DOCK_ICONS = {
     "about":    "help-about-symbolic",              # info badge -> version & feedback
 }
 
+# Where the dock floats, and how far a toast has to stay above it.
+#
+# libadwaita anchors a toast to the *bottom* of its overlay, which is exactly
+# where this window floats its dock -- so a toast used to open underneath the
+# dock, hidden behind it. The dock's whole visual extent is the 18px it floats
+# above the content edge, the 64px bar, and the 28px a magnified disc rises
+# above the pill while the pointer hovers it (the bar never grows, so the disc
+# simply overflows its top edge). Toasts clear all of that plus a little air.
+DOCK_BOTTOM_MARGIN = 18
+TOAST_GAP = 12
+# How far a magnified disc escapes the pill: an 80px disc, bottom-pinned 12px
+# above the bar's bottom edge, inside a 64px pill.
+DISC_OVERFLOW = int(MAX_DISC) - BAR_HEIGHT + BAR_PAD_BOTTOM
+TOAST_CLEARANCE = DOCK_BOTTOM_MARGIN + BAR_HEIGHT + DISC_OVERFLOW + TOAST_GAP
+
+_toast_css_loaded = False
+
+
+def _ensure_toast_css() -> None:
+    """Lift toasts clear of the floating dock.
+
+    ``toast`` is the *widget name* AdwToastWidget carries -- the selector
+    libadwaita's own stylesheet targets -- so this hits the toast and nothing
+    else. libadwaita keeps a toast at least ``margin-bottom`` above the
+    overlay's edge and adds a few px of its own on top (measured on Adw 1.5:
+    a margin of 100 left a 106px gap), so asking for the clearance makes that
+    clearance a floor. Installed at APPLICATION priority, where the app's other
+    stylesheets live and above libadwaita's theme sheet.
+    """
+    global _toast_css_loaded  # noqa: PLW0603
+    if _toast_css_loaded:
+        return
+    _toast_css_loaded = True
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_data(f"toast {{ margin-bottom: {TOAST_CLEARANCE}px; }}\n".encode())
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, **kwargs) -> None:
@@ -97,7 +138,9 @@ class MainWindow(Adw.ApplicationWindow):
         overlay.set_vexpand(True)
         overlay.set_hexpand(True)
 
-        # Content stack (fills the overlay).
+        # Content stack (fills the overlay). The toast rule has to be installed
+        # before the first toast appears, hence here rather than at show time.
+        _ensure_toast_css()
         self.toast_overlay = Adw.ToastOverlay.new()
         # The page fades to transparent during navigation. Keep its backdrop
         # identical to the pages rather than exposing the decorative aurora.
@@ -130,7 +173,7 @@ class MainWindow(Adw.ApplicationWindow):
             light=self._dock_light,
             hover=self.dock,
         )
-        self.glass_dock.set_margin_bottom(18)
+        self.glass_dock.set_margin_bottom(DOCK_BOTTOM_MARGIN)
         self.glass_dock.set_halign(Gtk.Align.CENTER)
         self.glass_dock.set_valign(Gtk.Align.END)
         overlay.add_overlay(self.glass_dock)

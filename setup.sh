@@ -125,7 +125,14 @@ preflight() {
 
     log "sudo password required for package installs and /opt, /usr/local writes"
     sudo -v
-    ask "Install everything? (Qt $QT_VERSION, Hyprland+PPA, quickshell, caelestia, theme)" || die "aborted"
+    # No confirmation gate here. Reaching this point already means the caller
+    # asked for an install (a human typed ./setup.sh, or the GUI launched it),
+    # and what gets installed is not a decision this prompt can usefully inform:
+    # it is exactly what the flags already selected. It used to be an `ask`,
+    # which hung the GUI for good -- the app's PTY only answers sudo prompts,
+    # so nothing could reply and the build sat there forever. Users who want a
+    # subset opt out with --skip-apt / --skip-qt / --skip-fonts / --skip-config.
+    log "installing: Qt $QT_VERSION, Hyprland + PPA, quickshell, caelestia, theme"
     mkdir -p "$SRC_ROOT"
 }
 

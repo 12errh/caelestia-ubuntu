@@ -347,7 +347,13 @@ class InstallPage(Adw.Bin):
             self.win.toast(f"Cannot find setup.sh: {exc}")
             return
         self.win.state["password"] = self.pw_entry.get_text()
-        argv = ["bash", script]
+        # --yes is not optional here. setup.sh asks [y/N] questions with `read`,
+        # and this page's script runs in a PTY that only ever answers *sudo*
+        # prompts (runner.ScriptRunner) -- a [y/N] prompt there can never be
+        # replied to, so the install would hang instead of continuing. Every
+        # choice the user can make is already on this page as a switch, which is
+        # what the --skip-* flags below turn into.
+        argv = ["bash", script, "--yes"]
         for option, flag in ((self.opt_apt, "--skip-apt"), (self.opt_qt, "--skip-qt"),
                              (self.opt_fonts, "--skip-fonts"), (self.opt_config, "--skip-config")):
             if not option.get_active():

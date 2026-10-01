@@ -5,13 +5,14 @@ import time
 import unittest
 from unittest.mock import patch
 
+from gi.repository import Adw, GLib, GObject, Graphene, Gtk
+
 from caelestia_installer.main import MainWindow, PAGE_META
 from caelestia_installer.pages.install import InstallPage
 from caelestia_installer.pages.keybinds import KeybindsPage
 from caelestia_installer.pages.setup import SetupPage
 from caelestia_installer.pages.updates import UpdatesPage
 from caelestia_installer.pages.advanced import AdvancedPage
-from gi.repository import Adw, GLib, Gtk
 
 
 def settle(predicate, timeout=4):
@@ -22,6 +23,35 @@ def settle(predicate, timeout=4):
             return
         time.sleep(.005)
     raise AssertionError("Window did not settle")
+
+
+def _descendants(widget):
+    """Every widget below ``widget``, in tree order."""
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _descendants(child)
+        child = child.get_next_sibling()
+
+
+def _toast(window):
+    """The live AdwToastWidget, or ``None``.
+
+    AdwToastWidget is internal to libadwaita (Adw.Toast has no Python accessor
+    for its widget), so it is found by GType name in the overlay's children.
+    """
+    for widget in _descendants(window.toast_overlay):
+        if GObject.type_name(widget) == "AdwToastWidget" and widget.get_visible():
+            return widget
+    return None
+
+
+def _root_edge(widget, root, bottom=True):
+    """A widget's top or bottom edge, in window coordinates."""
+    ok, point = widget.compute_point(root, Graphene.Point().init(0.0, 0.0))
+    if not ok:
+        raise AssertionError("widget is not realised")
+    return point.y + widget.get_height() if bottom else point.y
 
 
 class NavigationTests(unittest.TestCase):
@@ -184,10 +214,47 @@ class NavigationTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertIn("--ignore-space", argv)
         self.assertEqual(argv[argv.index("--qt-version") + 1], "6.11.3")
+        # setup.sh asks its questions with `read`, and the script panel's PTY
+        # only ever answers *sudo* — a prompt left hanging there stops the
+        # install dead, with nothing on screen the user could type into. The GUI
+        # therefore has to answer them up front, with --yes.
+        self.assertIn("--yes", argv)
         self.win.state["busy"] = True
         advanced._refresh_advanced_buttons()
         self.assertFalse(advanced.row_qtver.get_sensitive())
         self.assertFalse(advanced.btn_upstream.get_sensitive())
+        self.assertEqual(self.errors, [])
+
+
+    def test_toasts_open_above_the_floating_dock(self):
+        """libadwaita anchors a toast to the bottom, where the dock floats.
+
+        Unfixed, a toast landed 34px above the content edge — well *inside* the
+        dock's footprint, so it opened hidden behind the navigation bar.
+        """
+        from caelestia_installer import dock as dock_module
+        from caelestia_installer.main import (DOCK_BOTTOM_MARGIN, DISC_OVERFLOW,
+                                              TOAST_CLEARANCE)
+
+        # Everything the dock can occupy: the bar, its bottom margin, and the
+        # height a magnified disc rises above the pill while hovered.
+        dock_extent = DOCK_BOTTOM_MARGIN + dock_module.BAR_HEIGHT + DISC_OVERFLOW
+        self.assertGreaterEqual(TOAST_CLEARANCE, dock_extent)
+
+        self.win.toast("placement probe")
+        settle(lambda: _toast(self.win) is not None)
+
+        def clearance():
+            toast = _toast(self.win)
+            if toast is None:
+                return -1
+            root = self.win.get_root()
+            bottom = _root_edge(self.win.stack, root, bottom=True)
+            return bottom - _root_edge(toast, root, bottom=True)
+
+        # Wait for the slide-in to finish rather than measuring mid-animation.
+        settle(lambda: clearance() >= TOAST_CLEARANCE - 12)
+        self.assertGreaterEqual(clearance(), dock_extent)
         self.assertEqual(self.errors, [])
 
 
