@@ -176,6 +176,15 @@ Defaults (all adjustable in **Setup → Idle & lock**):
 - **Terminal:** `./update.sh` (check + apply), `./update.sh --check`
   (read-only report), `./update.sh --update-sources` (deliberately move
   to latest upstream after testing it).
+- **The app itself** updates itself: on every launch the About tab checks
+  GitHub for a newer release and, if there is one, asks whether to install it.
+  Confirm and the package is downloaded, checked against the release's
+  `SHA256SUMS`, installed with apt, and the app offers to restart. Nothing
+  happens without your confirmation, and a package that fails its checksum is
+  thrown away. **Check for updates** does the same on demand. If you run the app
+  from a clone or with `app/install.sh`, the row names the command for your
+  install method instead — installing the package would replace the copy you are
+  running.
 - System packages (Hyprland, drivers, …) update normally with apt.
 - Every component builds from an **exact pinned commit**
   (`revisions.conf`), so updates can't silently break. Qt is a fixed

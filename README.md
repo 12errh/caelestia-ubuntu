@@ -44,8 +44,11 @@ wraps every script:
   ready-made desktop action. Edits are validated, written atomically and
   backed up, with a one-click undo.
 - **Updates screen** — published maintainer-tested revision checks and desktop
-  updates to accepted pins with a live log. The installed version and app
-  updates live in the About screen; installation is manual.
+  updates to accepted pins with a live log.
+- **About screen** — the installed version, and an app update check on every
+  launch: a newer release is offered, and on confirmation it is downloaded,
+  verified against the release's `SHA256SUMS` and installed with apt, then the
+  app offers to restart itself.
 - **Advanced tab** — install overrides, shell editor/restart, experimental
   upstream builds, Keep/Revert, runtime repair, and confirmed uninstall.
   Cancelling an upstream build restores pre-build pins, not installed binaries.

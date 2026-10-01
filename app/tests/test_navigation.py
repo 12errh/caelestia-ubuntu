@@ -3,6 +3,7 @@
 import sys
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from gi.repository import Adw, GLib, GObject, Graphene, Gtk
@@ -95,8 +96,11 @@ class NavigationTests(unittest.TestCase):
         self.settings.set_property("gtk-enable-animations", True)
         for name in PAGE_META:
             self.win.select_page(name)
+            # A generous budget: this test walks all eight pages with animations
+            # switched on, and a loaded machine can take longer than settle()'s
+            # default to finish one transition (it used to fail intermittently).
             settle(lambda: self.win.transition._phase == "idle"
-                   and self.win.stack.get_visible_child_name() == name)
+                   and self.win.stack.get_visible_child_name() == name, timeout=15)
             self.assertTrue(self.win.pages[name].get_mapped())
             self.assertEqual(self.win.stack.get_opacity(), 1)
             self.assertEqual(self.win.title_widget.get_title(), PAGE_META[name][1])
@@ -111,7 +115,7 @@ class NavigationTests(unittest.TestCase):
         for name in PAGE_META:
             self.win.select_page(name)
             settle(lambda: self.win.transition._phase == "idle"
-                   and self.win.stack.get_visible_child_name() == name)
+                   and self.win.stack.get_visible_child_name() == name, timeout=15)
         self.win.dock._prev_t = time.monotonic()
         self.assertFalse(self.win.dock._tick())
         self.assertEqual(self.errors, [])
@@ -255,6 +259,124 @@ class NavigationTests(unittest.TestCase):
         # Wait for the slide-in to finish rather than measuring mid-animation.
         settle(lambda: clearance() >= TOAST_CLEARANCE - 12)
         self.assertGreaterEqual(clearance(), dock_extent)
+        self.assertEqual(self.errors, [])
+
+
+    def test_startup_check_offers_and_installs_a_confirmed_update(self):
+        """Startup check -> confirmation -> download -> apt, in that order."""
+        import tempfile
+        from caelestia_installer.releases import Release
+        from caelestia_installer.updater import asset_name
+
+        page = self.win.page_about
+        self.assertFalse(page.btn_install.get_visible())
+        calls = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            staged = Path(directory) / asset_name("9.9.9")
+
+            def fake_download(version, directory=None, on_progress=None):
+                calls.append(("download", version))
+                staged.write_bytes(b"not a real deb")
+                return staged
+
+            with patch("caelestia_installer.pages.about.releases.fetch_latest",
+                       return_value=Release("9.9.9")), \
+                    patch("caelestia_installer.pages.about.updater."
+                          "installed_from_package", return_value=True), \
+                    patch("caelestia_installer.pages.about.paths.runs_from_clone",
+                          return_value=False), \
+                    patch("caelestia_installer.pages.about.updater.download",
+                          side_effect=fake_download), \
+                    patch("caelestia_installer.pages.about.updater.install_command",
+                          return_value=["/bin/echo", "apt-get", "install", "-y"]), \
+                    patch.object(self.win, "ensure_password",
+                                 side_effect=lambda callback, **kwargs: callback()):
+                page.check_async(startup=True)
+                # The check runs on a worker thread; let the result reach the loop.
+                settle(lambda: self.win.get_visible_dialog() is not None)
+
+                # Offered, not performed: a confirmation stands between the
+                # finding and the download.
+                dialog = self.win.get_visible_dialog()
+                self.assertEqual(calls, [])
+                dialog.emit("response", "install")
+                dialog.close()
+
+                # The final subtitle is written by _install_finished, i.e. after
+                # the panel has finished writing its log.
+                settle(lambda: page.row_updates.get_subtitle().startswith("Updated to"))
+                self.assertEqual(calls, [("download", "9.9.9")])
+                buf = page.panel.log_view.get_buffer()
+                log = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+                self.assertIn(f"[done] apt install {asset_name('9.9.9')} finished", log)
+
+            # The verified package is cleaned up once apt is done with it.
+            self.assertFalse(staged.exists())
+        self.assertEqual(self.errors, [])
+
+    def test_declining_the_update_downloads_nothing(self):
+        from caelestia_installer.releases import Release
+
+        page = self.win.page_about
+        with patch("caelestia_installer.pages.about.releases.fetch_latest",
+                   return_value=Release("9.9.9")), \
+                patch("caelestia_installer.pages.about.updater."
+                      "installed_from_package", return_value=True), \
+                patch("caelestia_installer.pages.about.paths.runs_from_clone",
+                      return_value=False), \
+                patch("caelestia_installer.pages.about.updater.download") as download:
+            page.check_async(startup=True)
+            settle(lambda: self.win.get_visible_dialog() is not None)
+            dialog = self.win.get_visible_dialog()
+            dialog.emit("response", "cancel")
+            dialog.close()
+            settle(lambda: not page._checking and not page._installing)
+            download.assert_not_called()
+            # Still offerable from the row.
+            self.assertTrue(page.btn_install.get_visible())
+        self.assertEqual(self.errors, [])
+
+    def test_constructing_the_window_never_checks_for_updates(self):
+        # The startup check lives in run_gui's activate, so building a window
+        # (tests, and any embedder) does no network I/O.
+        self.assertFalse(self.win.page_about._checking)
+        self.assertIsNone(self.win.page_about._release)
+
+
+    def test_source_install_is_offered_its_own_update_route(self):
+        """The .deb is not offered to an app that is not running as a package.
+
+        The package's postinst deletes /usr/local and ~/.local copies on
+        purpose, so installing it here would switch the user's install method
+        and remove the app they are running.
+        """
+        from caelestia_installer.releases import Release
+
+        page = self.win.page_about
+        cases = (
+            # A checkout, with and without a package also installed: either way
+            # the answer is `git pull`, never apt.
+            (True, False, "git pull"),
+            (True, True, "git pull"),
+            (False, False, "app/install.sh"),
+        )
+        for from_clone, packaged, route in cases:
+            page._release = None          # each pass starts from a clean slate
+            with self.subTest(from_clone=from_clone, packaged=packaged), \
+                    patch("caelestia_installer.pages.about.releases.fetch_latest",
+                          return_value=Release("9.9.9")), \
+                    patch("caelestia_installer.pages.about.updater."
+                          "installed_from_package", return_value=packaged), \
+                    patch("caelestia_installer.pages.about.paths.runs_from_clone",
+                          return_value=from_clone):
+                page.check_async(startup=True)
+                settle(lambda: route in page.row_updates.get_subtitle())
+                self.assertIsNone(self.win.get_visible_dialog(),
+                                  "a source install must not be prompted to apt")
+                self.assertFalse(page.btn_install.get_visible())
+                subtitle = page.row_updates.get_subtitle()
+                self.assertIn("9.9.9", subtitle)
         self.assertEqual(self.errors, [])
 
 

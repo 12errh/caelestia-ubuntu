@@ -11,6 +11,10 @@ All heavy work runs in threads; UI updates go through ``GLib.idle_add``.
 from __future__ import annotations
 
 import math
+import os
+from pathlib import Path
+import subprocess
+import sys
 import threading
 from typing import Callable
 
@@ -207,6 +211,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.state["installed"] = checks.installed_state()["installed"]
         self.select_page("welcome")
 
+    # ------------------------------------------------------------- self-update
+    def restart_app(self) -> None:
+        """Relaunch the app so a freshly installed version takes effect.
+
+        Spawned detached rather than ``exec``-ing in place: the GTK process has
+        to shut down cleanly first, and the new copy must survive it. The same
+        entry point the desktop launcher uses is re-invoked, with the repo
+        override the launcher sets, so a restart resolves the same repo.
+        """
+        entry = Path(__file__).resolve().parent.parent / "run.py"
+        if not entry.is_file():
+            self.toast("Restart Caelestia for Ubuntu to finish the update.")
+            return
+        env = dict(os.environ)
+        try:
+            env["CAEL_REPO_DIR"] = str(paths.repo_root())
+        except FileNotFoundError:
+            pass
+        try:
+            subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+                [sys.executable, str(entry)], env=env, start_new_session=True)
+        except OSError as exc:
+            self.toast(f"Could not restart the app: {exc}")
+            return
+        self.close()
+
     # ------------------------------------------------------------ navigation
     def select_page(self, page_id: str) -> None:
         """Navigate to a page by id."""
@@ -321,6 +351,10 @@ def run_gui() -> int:
     def on_activate(application: Adw.Application) -> None:
         win = MainWindow(application)
         win.present()
+        # One release check per launch, off the GTK thread, and only *offered*:
+        # AboutPage asks for confirmation before it downloads or installs
+        # anything. Done after present() so the check never delays the window.
+        win.page_about.check_async(startup=True)
 
     app.connect("activate", on_activate)
     try:

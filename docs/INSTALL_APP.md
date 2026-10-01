@@ -71,17 +71,32 @@ is preserved).
 
 ### Updating the app
 
-Open **Updates**: the first visit per app session checks GitHub for a newer stable
-`vMAJOR.MINOR.PATCH` release with an uploaded package. **Recheck now** retries,
-including after offline or rate-limit errors. **Get app update** asks before
-opening the official release page. Download the `.deb`, finish any desktop build,
-close the app, install that package with your software installer or `sudo apt
-install /absolute/path/to/package.deb`, and relaunch.
+The app checks GitHub for a newer stable `vMAJOR.MINOR.PATCH` release **once per
+launch**, right after the window appears, and again whenever **Check for
+updates** is pressed in **About**. An offline or rate-limited startup check is
+silent; a manual check says so on the row.
 
-This is **update notification plus manual installation**, not automatic package
-installation or an APT repository. It does not rebuild desktop components.
-Published desktop revisions are checked separately; **Use published pins** and
-**Apply updates** are explicit steps. Existing local pins survive app upgrades.
+When a newer release exists the app **asks before doing anything**, then, on
+confirmation: downloads the `.deb`, verifies it against the `SHA256SUMS` file
+published beside it, and installs it with `sudo apt-get install -y` in a live
+log panel, using the administrator password it already asks for. Nothing is
+downloaded and nothing is installed without that confirmation, and a package
+that does not match its published digest is deleted rather than installed. When
+the install succeeds the app offers to restart itself, because the running
+process still holds the previous code.
+
+The offer is only made when this app is running **as the installed package**.
+Running from a clone or from `app/install.sh` keeps that install method: the row
+names the matching command (`git pull`, or re-running `sudo ./app/install.sh`)
+instead, because installing the package would replace the copy you are running —
+the package's `postinst` deliberately removes `/usr/local` and `~/.local`
+installs, so switching methods silently is not something the app may decide for
+you.
+
+This installs the app itself. It does not rebuild desktop components: published
+desktop revisions are checked separately on **Updates**, where **Use published
+pins** and **Apply updates** are explicit steps. Existing local pins survive app
+upgrades.
 
 If running from a clone, update that checkout and restart. For `install.sh`
 installs, update the source and rerun the same installation command.
@@ -186,12 +201,13 @@ Other version formats are rejected by the package builder.
    the package workflow to succeed and verify the release contains its `.deb`
    and `SHA256SUMS`. Tag builds stamp the package's runtime version automatically
    without editing the source checkout.
-5. Keep the release published and stable (not draft/prerelease). Existing apps
-   with the checker offer it on the next Updates visit or **Recheck now**, once
-   GitHub's latest-release API reports it and the package asset is uploaded.
+5. Keep the release published and stable (not draft/prerelease). Existing
+   packaged apps check on their next launch (or on **Check for updates** in
+   About) and are offered the install, once GitHub's latest-release API reports
+   it and the package asset is uploaded.
 
-The app does not poll continuously, install packages automatically, or subscribe
-users to an APT repository. Older app versions without the checker require one
+The app checks once per launch rather than polling, and asks before downloading
+or installing anything. Older app versions without the install flow require one
 manual upgrade. A local build validates packaging, not installation on a fresh
 Ubuntu machine; test that separately before declaring a release supported.
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 APP_ID = "io.github.CaelestiaUbuntu.Installer"
 APP_NAME = "Caelestia for Ubuntu"
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 
 # Brand mark shown in the middle of the dock. This is a trimmed, 96px copy of
 # assets/logo.png kept *inside the package* so it ships with the app: install.sh
@@ -88,6 +88,19 @@ def repo_root() -> Path:
 def script(name: str) -> str:
     """Absolute path of a repository script (setup.sh / update.sh / uninstall.sh)."""
     return str(repo_root() / name)
+
+
+def runs_from_clone() -> bool:
+    """True when this app is running straight from a checkout, not installed.
+
+    Both installed layouts keep the repository scripts in a ``repo/`` directory
+    next to ``app/``; a checkout has them at its own root. Used to route an app
+    update to the right instructions -- ``git pull`` for a checkout,
+    ``app/install.sh`` for an installed copy, and the package's own installer
+    only when dpkg actually installed this app.
+    """
+    base = Path(__file__).resolve().parents[2]
+    return (base / "setup.sh").is_file() and not (base / "repo").is_dir()
 
 
 # Well-known paths created by setup.sh --------------------------------------

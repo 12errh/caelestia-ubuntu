@@ -131,7 +131,11 @@ GUIDES = [
         "icon": "view-refresh-symbolic",
         "sections": [
             ("Keep it current", [
-                "This app: **Updates tab → Recheck now**, then **Apply updates**.",
+                "This app updates itself: on every launch the **About** tab "
+                "checks for a newer release and asks before downloading and "
+                "installing it. Nothing happens without your confirmation.",
+                "**About → Check for updates** does the same on demand.",
+                "Desktop: **Updates tab → Recheck now**, then **Apply updates**.",
                 "Terminal: `./update.sh` — check + apply, `./update.sh --check` "
                 "for a read-only report.",
                 "System packages (Hyprland, drivers) update normally with apt.",
