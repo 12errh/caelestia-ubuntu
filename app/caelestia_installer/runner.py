@@ -11,6 +11,16 @@ root themselves (they need your real $HOME/$USER). The trick used here:
 
 No global LD_LIBRARY_PATH games, no root shell — the script keeps full
 control and the log shows everything it prints.
+
+Nothing else may ever ask a question
+------------------------------------
+Only this module writes to the PTY, and only to answer *sudo*. A prompt from
+anything else — the script's own ``[y/N]`` questions, a debconf dialog, apt's
+needrestart asking which services to restart, pipx asking for a keyring
+password, git asking for credentials on a mirror that suddenly wants auth —
+has nobody to answer it and would hang the install for good. So every script
+started here also gets :data:`UNATTENDED_ENV`, which turns each of those into
+either a sensible default or an immediate, visible failure instead of a wait.
 """
 
 from __future__ import annotations
@@ -26,6 +36,29 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
 SUDO_PROMPT_RE = re.compile(
     r"\[(?:sudo|sudo via \[[^\]]+\])\] password for [^\]]*:\s*$"
 )
+
+#: Environment that makes an unattended run behave like one. Set for every
+#: script the GUI launches, whatever the user typed.
+#:
+#: ``CAELESTIA_ASSUME_YES`` is read by the ``ask()`` helper in setup.sh and
+#: update.sh (and by any prompt added to them later): the GUI cannot type into
+#: the PTY, so an unanswered question would stall the run. The CLI scripts
+#: still prompt a real terminal, where this is unset.
+UNATTENDED_ENV = {
+    "CAELESTIA_ASSUME_YES": "1",
+    # A package with a debconf dialog (tzdata-style questions, a maintainer
+    # script asking something) would otherwise put a curses prompt on the PTY.
+    "DEBIAN_FRONTEND": "noninteractive",
+    # needrestart is pulled in by ordinary apt upgrades on Ubuntu and asks
+    # "which services should be restarted?" — the classic unattended hang.
+    "NEEDRESTART_MODE": "a",
+    "APT_LISTCHANGES_FRONTEND": "none",
+    # pipx keeps its metadata in a keyring and asks for a password to unlock it.
+    "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
+    # git must fail fast rather than ask for a username on a mirror that starts
+    # demanding auth mid-install.
+    "GIT_TERMINAL_PROMPT": "0",
+}
 
 
 def strip_ansi(text: str) -> str:
@@ -83,6 +116,9 @@ class ScriptRunner:
         env.setdefault("TERM", "xterm-256color")
         if self.env:
             env.update(self.env)
+        # Applied last, over the caller's own environment on purpose: nothing
+        # may re-enable a prompt this runner has nobody to answer.
+        env.update(UNATTENDED_ENV)
 
         self.proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             self.argv,

@@ -48,7 +48,11 @@ ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m ✘ %s\033[0m\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
-ask()  { [ "$ASSUME_YES" = 1 ] && return 0; read -r -p "$1 [y/N] " a; [[ "${a,,}" == y* ]]; }
+# Only ever called from a terminal a human can type into: the GUI runs this
+# script on a PTY it answers sudo prompts on and nothing else, so it exports
+# CAELESTIA_ASSUME_YES=1 (runner.UNATTENDED_ENV) and every question below is
+# answered for the user rather than stalling the run.
+ask()  { { [ "$ASSUME_YES" = 1 ] || [ "${CAELESTIA_ASSUME_YES:-0}" = 1 ]; } && return 0; read -r -p "$1 [y/N] " a; [[ "${a,,}" == y* ]]; }
 
 # ---------------------------------------------------------------------------
 # Revision pins

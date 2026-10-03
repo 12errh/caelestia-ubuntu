@@ -41,11 +41,32 @@ def preflight_harness(tmp: Path) -> Path:
 
 
 class SetupPromptTests(unittest.TestCase):
-    def test_preflight_installs_without_asking(self):
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            self.skipTest("setup.sh refuses to run as root")
+    def test_every_script_prompt_is_answered_when_unattended(self):
+        """No ``[y/N]`` question can stall a GUI-launched script.
+
+        The GUI runs these on a PTY it answers sudo prompts on and nothing else,
+        so it exports ``CAELESTIA_ASSUME_YES=1`` (runner.UNATTENDED_ENV). This
+        exercises the real ``ask()`` line from each script, with stdin closed,
+        so the guard cannot be dropped without this failing.
+        """
         if not os.path.exists("/bin/bash"):
             self.skipTest("bash is not installed")
+        for name in ("setup.sh", "update.sh"):
+            with self.subTest(script=name):
+                source = (REPO / name).read_text()
+                ask_line = next(
+                    (line for line in source.splitlines()
+                     if line.startswith("ask()")), None)
+                self.assertIsNotNone(ask_line, f"{name} has no ask() helper")
+                result = subprocess.run(
+                    ["bash", "-c", ask_line + '\nask "anything?" && echo YES || echo NO'],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                    env=dict(os.environ, ASSUME_YES="0", CAELESTIA_ASSUME_YES="1"),
+                    timeout=30, check=False)
+                self.assertEqual(result.stdout.strip(), "YES",
+                                 f"{name} would wait for input")
+
+    def test_preflight_installs_without_asking(self):
 
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)

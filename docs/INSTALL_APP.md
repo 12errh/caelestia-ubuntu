@@ -187,6 +187,28 @@ The CI workflow (`.github/workflows/deb.yml`) builds on main pushes and pull
 requests, and attaches a package plus `SHA256SUMS` to `vMAJOR.MINOR.PATCH` tags.
 Other version formats are rejected by the package builder.
 
+### How the app runs the repository scripts
+
+`setup.sh`, `update.sh` and `uninstall.sh` call `sudo` repeatedly and refuse to
+run as root, so the app runs them on a pseudo-terminal and answers sudo's
+password prompts itself. That terminal is otherwise write-only for the app, so
+**nothing else is allowed to ask a question there** — an unanswered prompt has
+nobody to type into it and would stall the run for good. Every script launched
+from the GUI therefore gets `runner.UNATTENDED_ENV`:
+
+| Variable | Stops |
+|---|---|
+| `CAELESTIA_ASSUME_YES=1` | the scripts' own `[y/N]` questions (`ask()` answers yes) |
+| `DEBIAN_FRONTEND=noninteractive` | a package's debconf dialog appearing mid-install |
+| `NEEDRESTART_MODE=a` | apt's "which services should be restarted?" question |
+| `APT_LISTCHANGES_FRONTEND=none` | apt's changelog pager |
+| `PYTHON_KEYRING_BACKEND=…null…` | pipx asking for a keyring password |
+| `GIT_TERMINAL_PROMPT=0` | git asking for credentials on a mirror that starts demanding auth |
+
+These apply only to scripts the GUI starts; running `./setup.sh` or
+`./update.sh` in a terminal still asks its questions, and `--yes` still answers
+them.
+
 ### Release checklist
 
 1. On a supported GTK desktop, run from the repository root:
